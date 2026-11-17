@@ -63,6 +63,7 @@ public final class AppCommandIds {
     public static final String VIEW_ZOOM_RESET = "view.zoomReset";
     public static final String VIEW_TOGGLE_GRID = "view.toggleGrid";
     public static final String VIEW_FOLLOW_PLAYHEAD = "view.followPlayhead";
+    public static final String VIEW_KEYBOARD_RULER = "view.keyboardRuler";
 
     public static final String WINDOW_CASCADE = "window.cascade";
     public static final String WINDOW_TILE = "window.tile";

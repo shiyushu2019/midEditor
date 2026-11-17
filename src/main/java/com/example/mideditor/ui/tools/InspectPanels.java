@@ -1,13 +1,13 @@
 package com.example.mideditor.ui.tools;
 
-import com.example.mideditor.app.AppContext;
-import com.example.mideditor.app.Refreshable;
-import com.example.mideditor.document.MidiDocumentView;
-import com.example.mideditor.domain.GridSettings;
-import com.example.mideditor.domain.Note;
-import com.example.mideditor.engine.PlaybackEngine;
-import com.example.mideditor.ui.theme.Theme;
-import com.example.mideditor.util.Log;
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Dimension;
+import java.awt.FlowLayout;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.function.Consumer;
 
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
@@ -21,14 +21,15 @@ import javax.swing.JSpinner;
 import javax.swing.JTextArea;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.SwingUtilities;
-import java.awt.BorderLayout;
-import java.awt.Color;
-import java.awt.Dimension;
-import java.awt.FlowLayout;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.List;
-import java.util.function.Consumer;
+
+import com.example.mideditor.app.AppContext;
+import com.example.mideditor.app.Refreshable;
+import com.example.mideditor.document.MidiDocumentView;
+import com.example.mideditor.domain.GridSettings;
+import com.example.mideditor.domain.Note;
+import com.example.mideditor.engine.PlaybackEngine;
+import com.example.mideditor.ui.theme.Theme;
+import com.example.mideditor.util.Log;
 
 /** 输出 / 诊断 / 属性 / 网格设置 面板。 */
 final class InspectPanels {
@@ -115,6 +116,9 @@ final class InspectPanels {
             }
 
             PlaybackEngine engine = app.playback();
+            text.append("音频时钟：").append(app.synth().clockAvailable()
+                    ? "可用（采样级时间戳调度）"
+                    : "不可用（8ms 精确回退调度）").append('\n');
             text.append("播放状态：").append(engine.state()).append('\n');
             text.append("已发送音符事件：").append(app.synth().noteEventsSent())
                     .append(" · 最后时间戳：").append(app.synth().lastTimestamp()).append('\n');
@@ -243,6 +247,10 @@ final class InspectPanels {
                 GridSettings.Resolution.values());
         private final JCheckBox visibleBox = new JCheckBox("显示网格线");
         private final JCheckBox snapBox = new JCheckBox("吸附到网格");
+        private final JCheckBox keyboardRulerBox = new JCheckBox("显示键盘标尺");
+        private final JComboBox<GridSettings.NoteLength> noteLengthBox = new JComboBox<>(
+                GridSettings.NoteLength.values());
+        private final JSpinner customTicksSpinner = new JSpinner(new SpinnerNumberModel(240, 1, 15360, 10));
         private final JLabel stepLabel = caption("步长：-");
         private boolean updating;
 
@@ -287,10 +295,58 @@ final class InspectPanels {
                     view.grid().setSnapEnabled(snapBox.isSelected());
                 }
             });
+
+            keyboardRulerBox.setFont(Theme.SMALL_FONT);
+            keyboardRulerBox.setOpaque(false);
+            keyboardRulerBox.addActionListener(e -> {
+                if (updating) {
+                    return;
+                }
+                MidiDocumentView view = app.activeView();
+                if (view != null) {
+                    view.setKeyboardRulerVisible(keyboardRulerBox.isSelected());
+                    app.refreshCommandStates();
+                }
+            });
+
+            noteLengthBox.setFont(Theme.SMALL_FONT);
+            noteLengthBox.setToolTipText("在坐标空白处添加平行线时使用的默认长度");
+            noteLengthBox.addActionListener(e -> {
+                if (updating) {
+                    return;
+                }
+                MidiDocumentView view = app.activeView();
+                if (view != null) {
+                    view.grid().setNoteLength((GridSettings.NoteLength) noteLengthBox.getSelectedItem());
+                    refresh();
+                }
+            });
+            customTicksSpinner.setFont(Theme.SMALL_FONT);
+            customTicksSpinner.addChangeListener(e -> {
+                if (updating) {
+                    return;
+                }
+                MidiDocumentView view = app.activeView();
+                if (view != null && view.grid().noteLength() == GridSettings.NoteLength.CUSTOM) {
+                    view.grid().setCustomNoteTicks(((Number) customTicksSpinner.getValue()).longValue());
+                }
+            });
+
             add(resolutionBox);
             add(visibleBox);
             add(snapBox);
             add(stepLabel);
+            add(javax.swing.Box.createVerticalStrut(6));
+            add(caption("新建平行线默认长度"));
+            add(noteLengthBox);
+            JPanel customRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 1));
+            customRow.setOpaque(false);
+            customRow.add(caption("自定义 tick"));
+            customTicksSpinner.setPreferredSize(new Dimension(78, 22));
+            customRow.add(customTicksSpinner);
+            add(customRow);
+            add(javax.swing.Box.createVerticalStrut(6));
+            add(keyboardRulerBox);
         }
 
         @Override
@@ -302,6 +358,9 @@ final class InspectPanels {
                 resolutionBox.setEnabled(enabled);
                 visibleBox.setEnabled(enabled);
                 snapBox.setEnabled(enabled);
+                keyboardRulerBox.setEnabled(enabled);
+                noteLengthBox.setEnabled(enabled);
+                customTicksSpinner.setEnabled(enabled);
                 if (!enabled) {
                     stepLabel.setText("步长：-");
                     return;
@@ -309,6 +368,10 @@ final class InspectPanels {
                 resolutionBox.setSelectedItem(view.grid().resolution());
                 visibleBox.setSelected(view.grid().visible());
                 snapBox.setSelected(view.grid().snapEnabled());
+                keyboardRulerBox.setSelected(view.keyboardRulerVisible());
+                noteLengthBox.setSelectedItem(view.grid().noteLength());
+                customTicksSpinner.setValue(view.grid().customNoteTicks());
+                customTicksSpinner.setEnabled(view.grid().noteLength() == GridSettings.NoteLength.CUSTOM);
                 long step = view.grid().step(view.document().ppq());
                 stepLabel.setText(step > 0 ? "步长：" + step + " ticks" : "步长：关闭");
             } finally {

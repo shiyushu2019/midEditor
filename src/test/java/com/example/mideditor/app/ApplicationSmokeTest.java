@@ -1,19 +1,66 @@
 package com.example.mideditor.app;
 
-import com.example.mideditor.command.AppCommandIds;
-import com.example.mideditor.document.DocumentSession;
-import org.junit.jupiter.api.Test;
+import java.awt.GraphicsEnvironment;
 
 import javax.swing.SwingUtilities;
-import java.awt.GraphicsEnvironment;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import org.junit.jupiter.api.Test;
+
+import com.example.mideditor.command.AppCommandIds;
+import com.example.mideditor.document.DocumentSession;
+import com.example.mideditor.mdi.MdiChildFrame;
 
 /** MDI 启动为空、多文档路由与撤销隔离的端到端冒烟测试。 */
 class ApplicationSmokeTest {
+
+    @Test
+    void openedDocumentIsMaximizedByDefault() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "需要图形环境");
+        AppContext app = new AppContext();
+        MainFrame[] holder = new MainFrame[1];
+        SwingUtilities.invokeAndWait(() -> {
+            holder[0] = new MainFrame(app);
+            holder[0].setLocation(-4000, -4000);
+            holder[0].setVisible(true);
+        });
+        MainFrame frame = holder[0];
+        try {
+            SwingUtilities.invokeAndWait(app.documents()::newDocument);
+            SwingUtilities.invokeAndWait(() -> {
+                // 刷新已排队的布局/最大化动作
+            });
+            MdiChildFrame first = frame.workspace().activeFrame();
+            assertNotNull(first);
+            assertTrue(first.isMaximum(), "打开文档后子窗口应默认最大化");
+
+            SwingUtilities.invokeAndWait(app.documents()::newDocument);
+            SwingUtilities.invokeAndWait(() -> {
+            });
+            MdiChildFrame second = frame.workspace().activeFrame();
+            assertNotNull(second);
+            assertTrue(second.isMaximum(), "后续打开的文档也应默认最大化");
+
+            SwingUtilities.invokeAndWait(() -> frame.workspace().cascade());
+            assertFalse(first.isMaximum(), "层叠应取消最大化");
+            assertFalse(second.isMaximum(), "层叠应取消最大化");
+        } finally {
+            SwingUtilities.invokeAndWait(() -> {
+                for (DocumentSession session : app.documents().sessions()) {
+                    session.view().disposeView();
+                    if (session.frame() != null) {
+                        session.frame().dispose();
+                    }
+                }
+                frame.dispose();
+                app.shutdown();
+            });
+        }
+    }
 
     @Test
     void emptyStartThenDocumentsRouteAndUndoInIsolation() throws Exception {

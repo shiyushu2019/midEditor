@@ -1,19 +1,5 @@
 package com.example.mideditor.io;
 
-import com.example.mideditor.document.MidiDocument;
-import com.example.mideditor.domain.Note;
-import com.example.mideditor.domain.TimeSignature;
-import com.example.mideditor.domain.TempoMap;
-import com.example.mideditor.domain.Track;
-import com.example.mideditor.domain.TrackPalette;
-
-import javax.sound.midi.InvalidMidiDataException;
-import javax.sound.midi.MetaMessage;
-import javax.sound.midi.MidiEvent;
-import javax.sound.midi.MidiMessage;
-import javax.sound.midi.MidiSystem;
-import javax.sound.midi.Sequence;
-import javax.sound.midi.ShortMessage;
 import java.io.IOException;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
@@ -29,15 +15,34 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import javax.sound.midi.InvalidMidiDataException;
+import javax.sound.midi.MetaMessage;
+import javax.sound.midi.MidiEvent;
+import javax.sound.midi.MidiMessage;
+import javax.sound.midi.MidiSystem;
+import javax.sound.midi.Sequence;
+import javax.sound.midi.ShortMessage;
+
+import com.example.mideditor.document.MidiDocument;
+import com.example.mideditor.domain.Note;
+import com.example.mideditor.domain.PitchRange;
+import com.example.mideditor.domain.RawChannelEvent;
+import com.example.mideditor.domain.TempoMap;
+import com.example.mideditor.domain.TimeSignature;
+import com.example.mideditor.domain.Track;
+import com.example.mideditor.domain.TrackPalette;
+
 /**
  * 使用 JDK 自带的 javax.sound.midi 解析 / 生成 .mid（不手写解析器）。
  */
 public final class MidiFileCodec {
 
     private static final int META_TEXT = 0x03;
+    private static final int META_MARKER_TEXT = 0x01;
     private static final int META_TEMPO = 0x51;
     private static final int META_TIME_SIGNATURE = 0x58;
     private static final int DRUM_CHANNEL = 9;
+    private static final String RANGE_MARKER = "mideditor:yRange=";
 
     private MidiFileCodec() {
     }
@@ -49,6 +54,7 @@ public final class MidiFileCodec {
         int volume = 100;
         int pan = 64;
         final List<Note> notes = new ArrayList<>();
+        final List<RawChannelEvent> rawEvents = new ArrayList<>();
 
         ChannelData(int channel) {
             this.channel = channel;
@@ -104,6 +110,7 @@ public final class MidiFileCodec {
 
         for (javax.sound.midi.Track midiTrack : sequence.getTracks()) {
             String trackName = findTrackName(midiTrack);
+            PitchRange storedRange = findStoredRange(midiTrack);
             Map<Integer, ChannelData> channels = new LinkedHashMap<>();
             Map<Integer, Deque<long[]>> pendingNotes = new HashMap<>();
 
@@ -142,11 +149,40 @@ public final class MidiFileCodec {
                 for (Note note : data.notes) {
                     track.addNote(note);
                 }
+                for (RawChannelEvent raw : data.rawEvents) {
+                    track.addRawEvent(raw);
+                }
                 track.sortNotes();
-                track.autoRangeFromNotes();
+                if (storedRange != null) {
+                    track.setYRange(storedRange);
+                } else {
+                    track.autoRangeFromNotes();
+                }
                 doc.addTrack(track);
             }
         }
+    }
+
+    private static PitchRange findStoredRange(javax.sound.midi.Track midiTrack) {
+        for (int i = 0; i < midiTrack.size(); i++) {
+            MidiMessage message = midiTrack.get(i).getMessage();
+            if (!(message instanceof MetaMessage meta) || meta.getType() != META_MARKER_TEXT) {
+                continue;
+            }
+            String text = decodeText(meta.getData());
+            if (!text.startsWith(RANGE_MARKER)) {
+                continue;
+            }
+            String[] parts = text.substring(RANGE_MARKER.length()).split(",");
+            if (parts.length == 2) {
+                try {
+                    return new PitchRange(Integer.parseInt(parts[0].trim()), Integer.parseInt(parts[1].trim()));
+                } catch (NumberFormatException ignored) {
+                    // 忽略非法标记
+                }
+            }
+        }
+        return null;
     }
 
     private static String findTrackName(javax.sound.midi.Track midiTrack) {
@@ -197,7 +233,13 @@ public final class MidiFileCodec {
                 data.volume = value;
             } else if (pitch == 10) {
                 data.pan = value;
+            } else {
+                data.rawEvents.add(new RawChannelEvent(tick, command, pitch, value));
             }
+        } else if (command == ShortMessage.PITCH_BEND
+                || command == ShortMessage.CHANNEL_PRESSURE
+                || command == ShortMessage.POLY_PRESSURE) {
+            data.rawEvents.add(new RawChannelEvent(tick, command, pitch, value));
         }
     }
 
@@ -233,6 +275,13 @@ public final class MidiFileCodec {
                     shortMessage(ShortMessage.CONTROL_CHANGE, track.channel(), 7, track.volume()), 0));
             midiTrack.add(new MidiEvent(
                     shortMessage(ShortMessage.CONTROL_CHANGE, track.channel(), 10, track.pan()), 0));
+            midiTrack.add(new MidiEvent(
+                    metaMessage(META_MARKER_TEXT, RANGE_MARKER + track.yRange().low() + "," + track.yRange().high()),
+                    0));
+            for (RawChannelEvent raw : track.rawEvents()) {
+                midiTrack.add(new MidiEvent(
+                        shortMessage(raw.command(), track.channel(), raw.data1(), raw.data2()), raw.tick()));
+            }
             for (Note note : track.notes()) {
                 midiTrack.add(new MidiEvent(
                         shortMessage(ShortMessage.NOTE_ON, track.channel(), note.pitch(), note.velocity()),
@@ -253,8 +302,12 @@ public final class MidiFileCodec {
     }
 
     private static MetaMessage metaText(String text) throws InvalidMidiDataException {
+        return metaMessage(META_TEXT, text);
+    }
+
+    private static MetaMessage metaMessage(int type, String text) throws InvalidMidiDataException {
         byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
-        return new MetaMessage(META_TEXT, bytes, bytes.length);
+        return new MetaMessage(type, bytes, bytes.length);
     }
 
     private static MetaMessage metaTempo(long microsPerQuarter) throws InvalidMidiDataException {

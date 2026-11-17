@@ -38,6 +38,9 @@
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-surefire-plugin</artifactId>
           <version>3.2.5</version>
+          <configuration>
+            <argLine>--add-exports java.desktop/com.sun.media.sound=ALL-UNNAMED</argLine>
+          </configuration>
         </plugin>
       </plugins>
     </pluginManagement>
@@ -51,6 +54,9 @@
             <manifest>
               <mainClass>com.example.mideditor.MidiEditorApp</mainClass>
             </manifest>
+            <manifestEntries>
+              <Add-Exports>java.desktop/com.sun.media.sound</Add-Exports>
+            </manifestEntries>
           </archive>
         </configuration>
       </plugin>

@@ -45,6 +45,13 @@ public final class TransportBar extends JPanel {
         add(toggleButton(registry.action(AppCommandIds.PLAY_TOGGLE_LOOP), Icons.loop(), "循环播放"));
         add(toggleButton(registry.action(AppCommandIds.PLAY_TOGGLE_METRONOME), Icons.metronome(), "节拍器"));
 
+        JButton addTrack = textButton("＋轨", "添加音轨（Ctrl+Shift+T）");
+        addTrack.addActionListener(e -> host.addTrack());
+        add(addTrack);
+        JButton removeTrack = textButton("－轨", "删除当前音轨");
+        removeTrack.addActionListener(e -> host.removeTrack(host.activeTrack()));
+        add(removeTrack);
+
         add(separator());
         positionLabel.setFont(Theme.MONO_FONT);
         positionLabel.setText("tick 0 · 00:00.000");
@@ -93,6 +100,15 @@ public final class TransportBar extends JPanel {
         add(zoomSlider);
 
         refresh();
+    }
+
+    private static JButton textButton(String text, String tooltip) {
+        JButton button = new JButton(text);
+        button.setFont(Theme.SMALL_FONT);
+        button.setToolTipText(tooltip);
+        button.setFocusable(false);
+        button.setMargin(new java.awt.Insets(1, 6, 1, 6));
+        return button;
     }
 
     private static JButton actionButton(Action action, javax.swing.Icon icon, String tooltip) {

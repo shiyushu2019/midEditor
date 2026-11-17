@@ -7,6 +7,7 @@
       "request": "launch",
       "mainClass": "com.example.mideditor.MidiEditorApp",
       "projectName": "mid-editor",
+      "vmArgs": "--add-exports java.desktop/com.sun.media.sound=ALL-UNNAMED",
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}"
     }

@@ -9,6 +9,7 @@ import javax.sound.midi.ShortMessage;
 import com.example.mideditor.document.MidiDocument;
 import com.example.mideditor.domain.GmProgram;
 import com.example.mideditor.domain.Note;
+import com.example.mideditor.domain.RawChannelEvent;
 import com.example.mideditor.domain.TempoMap;
 import com.example.mideditor.domain.TimeSignature;
 import com.example.mideditor.domain.Track;
@@ -50,6 +51,10 @@ public final class PlaybackPlan {
             events.add(new Event(0, ShortMessage.PROGRAM_CHANGE, channel, track.program(), 0));
             events.add(new Event(0, ShortMessage.CONTROL_CHANGE, channel, 7, track.volume()));
             events.add(new Event(0, ShortMessage.CONTROL_CHANGE, channel, 10, track.pan()));
+            for (RawChannelEvent raw : track.rawEvents()) {
+                endTick = Math.max(endTick, raw.tick());
+                events.add(new Event(raw.tick(), raw.command(), channel, raw.data1(), raw.data2()));
+            }
             for (Note note : track.notes()) {
                 endTick = Math.max(endTick, note.endTick());
                 events.add(new Event(note.startTick(), ShortMessage.NOTE_ON, channel, note.pitch(), note.velocity()));

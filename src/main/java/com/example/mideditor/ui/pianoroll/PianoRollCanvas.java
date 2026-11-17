@@ -33,6 +33,8 @@ public final class PianoRollCanvas extends JComponent {
     private int pressPitch;
     private int dragLane;
     private Track dragTrack;
+    private Note pressedNote;
+    private boolean dragged;
     private Rectangle marquee;
 
     public PianoRollCanvas(PianoRollView view) {
@@ -126,6 +128,8 @@ public final class PianoRollCanvas extends JComponent {
                     mode = hit.rightEdge() ? Mode.RESIZE : Mode.MOVE;
                     dragTrack = hit.track();
                     dragLane = hit.laneIndex();
+                    pressedNote = hit.note();
+                    dragged = false;
                     pressX = e.getX();
                     pressY = e.getY();
                     pressTick = view.timeline().tickAtX(e.getX(), ppq);
@@ -162,12 +166,14 @@ public final class PianoRollCanvas extends JComponent {
                     if (dragTrack == null) {
                         return;
                     }
+                    dragged = true;
                     long rawTick = view.timeline().tickAtX(e.getX(), ppq) - pressTick;
                     int currentPitch = view.pitchAt(dragTrack, dragLane, e.getY());
                     host().applySelectionMove(rawTick, currentPitch - pressPitch);
                     view.repaint();
                 }
                 case RESIZE -> {
+                    dragged = true;
                     long rawTick = view.timeline().tickAtX(e.getX(), ppq) - pressTick;
                     host().applySelectionResize(rawTick);
                     view.repaint();
@@ -179,6 +185,9 @@ public final class PianoRollCanvas extends JComponent {
 
         @Override
         public void mouseReleased(MouseEvent e) {
+            Track auditionTrack = dragTrack;
+            Note auditionNote = pressedNote;
+            boolean audition = mode == Mode.MOVE && !dragged && auditionNote != null;
             switch (mode) {
                 case MOVE -> host().commitSelectionEdit("移动平行线");
                 case RESIZE -> host().commitSelectionEdit("调整平行线长度");
@@ -195,6 +204,11 @@ public final class PianoRollCanvas extends JComponent {
             }
             mode = Mode.NONE;
             dragTrack = null;
+            pressedNote = null;
+            dragged = false;
+            if (audition) {
+                host().auditionNote(auditionTrack, auditionNote);
+            }
             mouseMoved(e);
         }
 

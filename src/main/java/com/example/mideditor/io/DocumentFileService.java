@@ -4,9 +4,11 @@ import java.awt.Component;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.function.Supplier;
 
 import javax.sound.midi.InvalidMidiDataException;
 import javax.swing.JFileChooser;
+import javax.swing.JOptionPane;
 import javax.swing.filechooser.FileNameExtensionFilter;
 
 import com.example.mideditor.document.MidiDocument;
@@ -38,14 +40,51 @@ public final class DocumentFileService {
         }
         chooser.setSelectedFile(new java.io.File(lastDirectory.toFile(), name));
         if (chooser.showSaveDialog(parent) == JFileChooser.APPROVE_OPTION) {
-            Path path = chooser.getSelectedFile().toPath();
-            lastDirectory = path.getParent();
-            if (!path.getFileName().toString().toLowerCase().matches(".*\\.(mid|midi)$")) {
-                path = path.resolveSibling(path.getFileName() + ".mid");
+            Path path = ensureMidiExtension(chooser.getSelectedFile().toPath());
+            if (Files.isDirectory(path)) {
+                JOptionPane.showMessageDialog(parent,
+                        "所选路径是一个目录，请指定文件名。", "保存失败", JOptionPane.WARNING_MESSAGE);
+                return null;
             }
+            if (!ensureOverwriteAllowed(path, () -> confirmOverwrite(parent, path))) {
+                return null;
+            }
+            lastDirectory = path.getParent();
             return path;
         }
         return null;
+    }
+
+    /** 补全 .mid 扩展名（返回值只读，保证 lambda 能捕获）。 */
+    static Path ensureMidiExtension(Path path) {
+        String file = path.getFileName().toString().toLowerCase();
+        if (file.matches(".*\\.(mid|midi)$")) {
+            return path;
+        }
+        return path.resolveSibling(path.getFileName() + ".mid");
+    }
+
+    /**
+     * 覆盖确认：目标不存在直接允许；已存在则交由 confirm 决定。
+     * 抽成 Supplier 便于单元测试，真实调用会弹出模态确认框。
+     */
+    static boolean ensureOverwriteAllowed(Path path, Supplier<Boolean> confirm) {
+        if (path == null) {
+            return false;
+        }
+        if (!Files.exists(path)) {
+            return true;
+        }
+        return Boolean.TRUE.equals(confirm.get());
+    }
+
+    private static boolean confirmOverwrite(Component parent, Path path) {
+        int choice = JOptionPane.showConfirmDialog(parent,
+                "文件已存在：\n" + path.toAbsolutePath() + "\n\n是否覆盖？",
+                "确认覆盖",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE);
+        return choice == JOptionPane.YES_OPTION;
     }
 
     private static JFileChooser createChooser() {

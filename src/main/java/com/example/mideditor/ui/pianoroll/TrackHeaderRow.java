@@ -59,6 +59,22 @@ public final class TrackHeaderRow extends JPanel {
         nameField.setFont(Theme.BOLD_FONT);
         nameField.setBorder(BorderFactory.createEmptyBorder(1, 3, 1, 3));
         nameField.setPreferredSize(new Dimension(120, 22));
+        nameField.setEditable(false);
+        nameField.setFocusable(false);
+        nameField.setToolTipText("单击切换音轨，双击重命名");
+        nameField.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mousePressed(java.awt.event.MouseEvent e) {
+                host().setActiveTrack(track);
+            }
+
+            @Override
+            public void mouseClicked(java.awt.event.MouseEvent e) {
+                if (e.getClickCount() == 2 && javax.swing.SwingUtilities.isLeftMouseButton(e)) {
+                    startRename();
+                }
+            }
+        });
         nameField.addActionListener(e -> commitName());
         nameField.addFocusListener(new FocusAdapter() {
             @Override
@@ -183,7 +199,40 @@ public final class TrackHeaderRow extends JPanel {
                 host().setActiveTrack(track);
             }
         });
+        installSelectionOnClick(this);
         refreshFromModel();
+    }
+
+    /** 除可交互控件外，单击音轨头任意位置都切换为活动音轨（否则用户很难发现要“点空白处”）。 */
+    private void installSelectionOnClick(java.awt.Component component) {
+        component.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mousePressed(java.awt.event.MouseEvent e) {
+                host().setActiveTrack(track);
+            }
+        });
+        if (component instanceof java.awt.Container container) {
+            for (java.awt.Component child : container.getComponents()) {
+                if (child instanceof JButton || child instanceof JToggleButton
+                        || child instanceof JSlider || child instanceof JComboBox) {
+                    continue;
+                }
+                if (child instanceof JTextField) {
+                    continue;
+                }
+                installSelectionOnClick(child);
+            }
+        }
+    }
+
+    private void startRename() {
+        if (nameField.isEditable()) {
+            return;
+        }
+        nameField.setFocusable(true);
+        nameField.setEditable(true);
+        nameField.requestFocusInWindow();
+        nameField.selectAll();
     }
 
     private MidiDocumentView host() {
@@ -240,6 +289,11 @@ public final class TrackHeaderRow extends JPanel {
         if (updating) {
             return;
         }
+        if (!nameField.isEditable()) {
+            return;
+        }
+        nameField.setEditable(false);
+        nameField.setFocusable(false);
         String value = nameField.getText().trim();
         if (value.isEmpty() || value.equals(track.name())) {
             nameField.setText(track.name());

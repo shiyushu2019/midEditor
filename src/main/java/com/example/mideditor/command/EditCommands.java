@@ -1,11 +1,11 @@
 package com.example.mideditor.command;
 
+import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
+
 import com.example.mideditor.app.AppContext;
 import com.example.mideditor.document.MidiDocumentView;
 import com.example.mideditor.ui.theme.Icons;
-
-import java.awt.event.InputEvent;
-import java.awt.event.KeyEvent;
 
 /** 编辑 / 平行线 / 音轨命令。 */
 final class EditCommands {
@@ -40,6 +40,8 @@ final class EditCommands {
                 ctx -> ctx.hasDocument() && ctx.document().editStack().canRedo(), null);
         redo.putIcon(Icons.redo());
         registry.register(redo);
+        // Windows/Word 习惯：Ctrl+Y 也可重做
+        registry.bindAlias(AppCommandIds.EDIT_REDO, FileCommands.key(KeyEvent.VK_Y, InputEvent.CTRL_DOWN_MASK));
 
         AppCommand cut = new AppCommand(AppCommandIds.EDIT_CUT, "剪切", CommandScope.SELECTION,
                 FileCommands.key(KeyEvent.VK_X, InputEvent.CTRL_DOWN_MASK),

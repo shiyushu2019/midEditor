@@ -29,6 +29,11 @@ public final class PlaybackEngine {
 
     private static final int LOOKAHEAD_US = 260_000;
     private static final long SCHEDULER_SLEEP_MS = 20;
+    /** 没有音频时钟时不能"超前发送"，否则一窗内的音符会一起响，只能贴近到期时间发送。 */
+    private static final int FALLBACK_LOOKAHEAD_US = 8_000;
+    private static final long FALLBACK_SLEEP_MS = 3;
+    /** note-off 略提前，保证同 tick 的下一条 note-on 不被误杀。 */
+    private static final long NOTE_OFF_NUDGE_US = 400;
 
     private final SynthService synth;
     private final List<Listener> listeners = new CopyOnWriteArrayList<>();
@@ -43,7 +48,6 @@ public final class PlaybackEngine {
     private volatile long anchorTick;
     private volatile long anchorMicros;
     private volatile long anchorNanos;
-    private volatile long anchorSynthMicros = -1;
     private volatile long frozenTick;
 
     private int nextIndex;
@@ -88,7 +92,7 @@ public final class PlaybackEngine {
         }
         synchronized (lock) {
             stopSchedulerThread();
-            synth.allNotesOff();
+            synth.resetAllChannels();
             this.owner = owner;
             this.plan = newPlan;
             this.loopEnabled = loop && range != null && range.valid() && range.startTick() >= 0;
@@ -200,10 +204,8 @@ public final class PlaybackEngine {
     }
 
     private double elapsedMicros() {
-        long synthNow = synth.micros();
-        if (synthNow >= 0 && anchorSynthMicros >= 0) {
-            return synthNow - anchorSynthMicros;
-        }
+        // 主时钟必须用 nanoTime：Gervill 的 getMicrosecondPosition 是"已渲染帧数"，
+        // 空闲/恢复时会一次性追帧（例如 16384 帧 ≈ 371ms），直接拿它算 elapsed 会跳变。
         return (System.nanoTime() - anchorNanos) / 1000.0;
     }
 
@@ -216,23 +218,22 @@ public final class PlaybackEngine {
         anchorTick = target;
         anchorMicros = p.tempo().microsAtTick(target);
         anchorNanos = System.nanoTime();
-        anchorSynthMicros = synth.micros();
         cycleOffsetUs = 0;
         nextIndex = p.indexAtTick(target);
         frozenTick = target;
-        sendInitialSetup(p);
+        sendStateUpTo(p, target);
     }
 
-    /** 定位后需要重新下发 tick 0 的 program/CC 事件（不能重发音符）。 */
-    private void sendInitialSetup(PlaybackPlan p) {
+    /** 重放目标 tick 之前的非音符状态事件（program / CC / 弯音 / RPN），保证 seek 后调音一致。 */
+    private void sendStateUpTo(PlaybackPlan p, long targetTick) {
         for (PlaybackPlan.Event event : p.events()) {
-            if (event.tick() > 0) {
+            if (event.tick() > targetTick) {
                 break;
             }
-            if (event.command() == ShortMessage.PROGRAM_CHANGE
-                    || event.command() == ShortMessage.CONTROL_CHANGE) {
-                sendImmediate(event);
+            if (event.command() == ShortMessage.NOTE_ON || event.command() == ShortMessage.NOTE_OFF) {
+                continue;
             }
+            sendImmediate(event);
         }
     }
 
@@ -255,8 +256,9 @@ public final class PlaybackEngine {
     private void runScheduler() {
         try {
             while (state == State.PLAYING) {
-                dispatchDue(elapsedMicros() + LOOKAHEAD_US);
-                Thread.sleep(SCHEDULER_SLEEP_MS);
+                boolean clock = synth.micros() >= 0;
+                dispatchDue(elapsedMicros() + (clock ? LOOKAHEAD_US : FALLBACK_LOOKAHEAD_US));
+                Thread.sleep(clock ? SCHEDULER_SLEEP_MS : FALLBACK_SLEEP_MS);
             }
         } catch (InterruptedException ignored) {
             Thread.currentThread().interrupt();
@@ -308,9 +310,16 @@ public final class PlaybackEngine {
     private void sendScheduled(PlaybackPlan.Event event, double dueUs) {
         try {
             ShortMessage message = new ShortMessage(event.command(), event.channel(), event.data1(), event.data2());
+            // 每次事件单独取当前合成器时钟，按"剩余延迟"换算时间戳，
+            // 这样即使 Gervill 刚追帧，也不会把事件排到错误的绝对时间。
+            double remainingUs = dueUs - elapsedMicros();
             long synthNow = synth.micros();
-            if (synthNow >= 0 && anchorSynthMicros >= 0) {
-                synth.send(message, anchorSynthMicros + Math.round(dueUs));
+            if (synthNow >= 0 && remainingUs > 2_000) {
+                long timestamp = synthNow + Math.round(remainingUs);
+                if (event.command() == ShortMessage.NOTE_OFF) {
+                    timestamp -= NOTE_OFF_NUDGE_US;
+                }
+                synth.send(message, timestamp);
             } else {
                 synth.send(message);
             }

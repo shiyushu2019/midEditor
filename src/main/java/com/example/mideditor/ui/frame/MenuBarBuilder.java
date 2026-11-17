@@ -1,14 +1,14 @@
 package com.example.mideditor.ui.frame;
 
-import com.example.mideditor.app.AppContext;
-import com.example.mideditor.command.AppCommandIds;
-import com.example.mideditor.ui.theme.Theme;
-
 import javax.swing.Action;
 import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JMenu;
 import javax.swing.JMenuBar;
 import javax.swing.JMenuItem;
+
+import com.example.mideditor.app.AppContext;
+import com.example.mideditor.command.AppCommandIds;
+import com.example.mideditor.ui.theme.Theme;
 
 /** 经典菜单栏：文件 / 编辑 / 视图 / 窗口 / 帮助，支持 Alt 激活与助记符。 */
 public final class MenuBarBuilder {
@@ -31,6 +31,7 @@ public final class MenuBarBuilder {
         bar.setFont(Theme.BASE_FONT);
         bar.add(fileMenu());
         bar.add(editMenu());
+        bar.add(trackMenu());
         bar.add(viewMenu());
         bar.add(windowMenu);
         bar.add(helpMenu());
@@ -138,6 +139,19 @@ public final class MenuBarBuilder {
         return menu;
     }
 
+    private JMenu trackMenu() {
+        JMenu menu = menu("音轨(T)", 'T');
+        item(menu, AppCommandIds.TRACK_ADD, "添加音轨(A)");
+        item(menu, AppCommandIds.TRACK_REMOVE, "删除当前音轨(D)");
+        menu.addSeparator();
+        item(menu, AppCommandIds.TRACK_MOVE_UP, "音轨上移(U)");
+        item(menu, AppCommandIds.TRACK_MOVE_DOWN, "音轨下移(N)");
+        menu.addSeparator();
+        checkItem(menu, AppCommandIds.TRACK_TOGGLE_MUTE, "静音(M)");
+        checkItem(menu, AppCommandIds.TRACK_TOGGLE_SOLO, "独奏(S)");
+        return menu;
+    }
+
     private JMenu viewMenu() {
         JMenu menu = menu("视图(V)", 'V');
         JMenu panels = new JMenu("工具窗口");
@@ -160,6 +174,7 @@ public final class MenuBarBuilder {
 
         checkItem(menu, AppCommandIds.VIEW_TOGGLE_GRID, "显示网格");
         checkItem(menu, AppCommandIds.VIEW_FOLLOW_PLAYHEAD, "播放头跟随");
+        checkItem(menu, AppCommandIds.VIEW_KEYBOARD_RULER, "键盘标尺(K)");
         menu.addSeparator();
 
         JMenu arrange = new JMenu("子窗口排列");

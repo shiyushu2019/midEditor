@@ -1,12 +1,13 @@
 package com.example.mideditor.command;
 
+import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
+
+import javax.swing.KeyStroke;
+
 import com.example.mideditor.app.AppContext;
 import com.example.mideditor.document.DocumentSession;
 import com.example.mideditor.ui.theme.Icons;
-
-import javax.swing.KeyStroke;
-import java.awt.event.InputEvent;
-import java.awt.event.KeyEvent;
 
 /** 文件菜单命令。 */
 final class FileCommands {
@@ -47,6 +48,8 @@ final class FileCommands {
                 key(KeyEvent.VK_S, InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK),
                 ctx -> ctx.app().documents().saveAs(sessionOf(ctx)), CommandContext::hasDocument, null);
         registry.register(saveAs);
+        // Word 习惯：F12 = 另存为
+        registry.bindAlias(AppCommandIds.FILE_SAVE_AS, KeyStroke.getKeyStroke(KeyEvent.VK_F12, 0));
 
         registry.register(new AppCommand(AppCommandIds.FILE_EXPORT, "导出 .mid...", CommandScope.DOCUMENT,
                 null, ctx -> ctx.app().documents().exportAs(sessionOf(ctx)),

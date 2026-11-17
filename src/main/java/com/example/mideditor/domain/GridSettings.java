@@ -53,6 +53,66 @@ public final class GridSettings {
     private Resolution resolution = Resolution.SIXTEENTH;
     private boolean visible = true;
     private boolean snapEnabled = true;
+    private NoteLength noteLength = NoteLength.FOLLOW_GRID;
+    private long customNoteTicks = 240;
+
+    /** 新建平行线时使用的默认长度。 */
+    public enum NoteLength {
+        FOLLOW_GRID("跟随网格"),
+        QUARTER("1/4"),
+        EIGHTH("1/8"),
+        SIXTEENTH("1/16"),
+        THIRTY_SECOND("1/32"),
+        BAR("1 小节"),
+        CUSTOM("自定义 tick");
+
+        private final String label;
+
+        NoteLength(String label) {
+            this.label = label;
+        }
+
+        public String label() {
+            return label;
+        }
+
+        @Override
+        public String toString() {
+            return label;
+        }
+    }
+
+    public NoteLength noteLength() {
+        return noteLength;
+    }
+
+    public void setNoteLength(NoteLength noteLength) {
+        this.noteLength = noteLength == null ? NoteLength.FOLLOW_GRID : noteLength;
+    }
+
+    public long customNoteTicks() {
+        return customNoteTicks;
+    }
+
+    public void setCustomNoteTicks(long ticks) {
+        this.customNoteTicks = Math.max(1, ticks);
+    }
+
+    /** 新建平行线的默认长度（1 小节按 4/4 估算，具体小节长度由文档视图决定）。 */
+    public long newNoteDuration(int ppq) {
+        return switch (noteLength) {
+            case FOLLOW_GRID -> {
+                long step = step(ppq);
+                yield step > 0 ? step : Math.max(1, ppq / 4);
+            }
+            case QUARTER -> Math.max(1, ppq);
+            case EIGHTH -> Math.max(1, ppq / 2);
+            case SIXTEENTH -> Math.max(1, ppq / 4);
+            case THIRTY_SECOND -> Math.max(1, ppq / 8);
+            case BAR -> Math.max(1, ppq * 4L);
+            case CUSTOM -> Math.max(1, customNoteTicks);
+        };
+    }
 
     public Resolution resolution() {
         return resolution;

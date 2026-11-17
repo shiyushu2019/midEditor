@@ -26,6 +26,7 @@ public final class Track {
     private boolean drumKit;
     private PitchRange yRange = PitchRange.centered(60, VISIBLE_ROWS);
     private final List<Note> notes = new ArrayList<>();
+    private final List<RawChannelEvent> rawEvents = new ArrayList<>();
 
     /** 每个音轨可见的音高行数（独立垂直滚动窗口）。 */
     public static final int VISIBLE_ROWS = 30;
@@ -155,6 +156,19 @@ public final class Track {
         for (Note n : snapshot) {
             notes.add(n.copy());
         }
+    }
+
+    /** 非建模通道事件（弯音、RPN 调音、延音踏板等），读写 .mid 时原样保留。 */
+    public List<RawChannelEvent> rawEvents() {
+        return rawEvents;
+    }
+
+    public void addRawEvent(RawChannelEvent event) {
+        rawEvents.add(event);
+    }
+
+    public List<RawChannelEvent> rawEventsCopy() {
+        return new ArrayList<>(rawEvents);
     }
 
     public Note noteById(java.util.UUID id) {

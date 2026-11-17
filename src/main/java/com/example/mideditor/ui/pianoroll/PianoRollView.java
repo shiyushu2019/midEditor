@@ -23,7 +23,10 @@ public final class PianoRollView extends JPanel {
     private final PianoRollCanvas canvas;
     private final TimeRuler ruler;
     private final TrackHeaderColumn headers;
+    private final PianoKeysColumn keysColumn;
+    private final JPanel rowHeader = new JPanel(new BorderLayout());
     private final JScrollPane scroll;
+    private boolean keyboardRulerVisible = true;
 
     public PianoRollView(MidiDocumentView host) {
         super(new BorderLayout());
@@ -31,12 +34,15 @@ public final class PianoRollView extends JPanel {
         canvas = new PianoRollCanvas(this);
         ruler = new TimeRuler(this);
         headers = new TrackHeaderColumn(this);
+        keysColumn = new PianoKeysColumn(this);
+        rowHeader.add(keysColumn, BorderLayout.WEST);
+        rowHeader.add(headers, BorderLayout.CENTER);
 
         scroll = new JScrollPane(canvas,
                 ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
                 ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         scroll.setColumnHeaderView(ruler);
-        scroll.setRowHeaderView(headers);
+        scroll.setRowHeaderView(rowHeader);
         JPanel corner = new JPanel();
         corner.setBackground(Theme.MENU_BACKGROUND);
         corner.setBorder(javax.swing.BorderFactory.createMatteBorder(0, 0, 1, 1, Theme.BORDER));
@@ -132,12 +138,54 @@ public final class PianoRollView extends JPanel {
         canvas.setPreferredSize(new Dimension(width, canvasHeight));
         ruler.setPreferredSize(new Dimension(width, Theme.RULER_HEIGHT));
         headers.setPreferredSize(new Dimension(Theme.HEADER_WIDTH, canvasHeight));
+        keysColumn.setVisible(keyboardRulerVisible);
+        int rowHeaderWidth = Theme.HEADER_WIDTH
+                + (keyboardRulerVisible ? Theme.PITCH_STRIP_WIDTH : 0);
+        rowHeader.setPreferredSize(new Dimension(rowHeaderWidth, canvasHeight));
         if (rebuildHeaders) {
             headers.rebuild();
         }
         scroll.revalidate();
         canvas.revalidate();
+        rowHeader.revalidate();
         repaint();
+    }
+
+    /** 画布高度（含至少一屏），供行头组件对齐使用。 */
+    public int canvasHeight() {
+        return Math.max(canvas.getPreferredSize().height, canvas.getHeight());
+    }
+
+    public boolean keyboardRulerVisible() {
+        return keyboardRulerVisible;
+    }
+
+    public void setKeyboardRulerVisible(boolean visible) {
+        if (keyboardRulerVisible == visible) {
+            return;
+        }
+        keyboardRulerVisible = visible;
+        keysColumn.setVisible(visible);
+        relayout(false);
+    }
+
+    /** 切换键盘标尺并返回新状态。 */
+    public boolean toggleKeyboardRuler() {
+        setKeyboardRulerVisible(!keyboardRulerVisible);
+        return keyboardRulerVisible;
+    }
+
+    /** 将指定泳道滚动到可见区域（添加 / 切换音轨时使用，优先把该泳道顶部对齐）。 */
+    public void scrollToLane(int laneIndex) {
+        if (laneIndex < 0) {
+            return;
+        }
+        Rectangle visible = scroll.getViewport().getViewRect();
+        int top = laneTop(laneIndex);
+        int bottom = top + laneHeight();
+        if (top < visible.y || bottom > visible.y + visible.height) {
+            scroll.getViewport().setViewPosition(new java.awt.Point(visible.x, Math.max(0, top - 4)));
+        }
     }
 
     private void onTimelineChanged() {
@@ -148,9 +196,10 @@ public final class PianoRollView extends JPanel {
         relayout(true);
     }
 
-    /** 音域 / 通道 / 属性变化后刷新音轨头文字。 */
+    /** 音域 / 通道 / 属性变化后刷新音轨头与键盘标尺。 */
     public void refreshPitchLabels() {
         headers.refreshRows();
+        keysColumn.repaint();
     }
 
     /** 只重绘播放头附近的窄条，避免整幅重绘。 */

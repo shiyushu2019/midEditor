@@ -1,7 +1,7 @@
 # midEditor 架构设计（经典 MDI 多音轨 MIDI 编辑器）
 
 > 状态：设计待确认（v0.1）
-> 技术栈：Java 21 + Swing/Java2D + javax.sound.midi (Gervill) + Maven Wrapper + JUnit 5
+> 技术栈：Java 21 + Swing/Java2D + javax.sound.midi (Gervill) + Maven 3.10.1 + JUnit 5
 
 ## 0. 技术栈决策
 
@@ -262,18 +262,18 @@ public interface DocumentEdit { String label(); void undo(); void redo(); boolea
 | S3 | 右键菜单全项 + 拖拽 move/resize/框选 + 剪贴板 + 量化/力度 + 插删休止 + 快捷键 | 全部编辑项可撤销 |
 | S4 | PlaybackEngine + Gervill + gm.dls + 播放头覆盖层 + 传输条 + 循环 + 节拍器 + 播放中 seek | 多轨真音色齐奏，播放头无漂移 |
 | S5 | DockManager 七个工具窗口 + 混音器/乐器/属性/网格设置 + 状态栏细节 + 诊断/输出 | 视图菜单控制全部面板 |
-| S6 | 性能优化、单元测试补全、完整验收走查 | `mvnw test` 全绿 + 验收清单 15 项通过 |
+| S6 | 性能优化、单元测试补全、完整验收走查 | `mvn test` 全绿 + 验收清单 15 项通过 |
 
 现有 `com.example.App` / `AppTest` 将在 S0 替换为新的入口与测试结构。
 
 ## 9. 实现状态（v1.0，已交付）
 
-已按 S0→S6 全部实现并通过 `mvnw test`（15 项）：
+已按 S0→S6 全部实现并通过 `mvn test`（26 项）：
 
 | 模块 | 实际实现 |
 | --- | --- |
 | 主框架 | `app/MainFrame`：菜单栏（Alt 激活 + 助记符）、工具栏、状态栏、停靠区 + `MdiWorkspace` |
-| MDI | `JDesktopPane` + `JInternalFrame`；层叠/平铺/最小化/还原；「窗口」菜单动态文档列表 |
+| MDI | `JDesktopPane` + `JInternalFrame`；层叠/平铺/最小化/还原；「窗口」菜单动态文档列表；新建/打开文档默认在客户区内最大化 |
 | 文档管理 | 启动为空；新建/打开/保存/另存/导出/关闭提示/退出检查；多文档活动切换 |
 | 命令 | `AppCommand` + `CommandRegistry` + `CommandRouter`（选中→音轨→文档→应用），Action 复用 |
 | 撤销 | 每文档 `EditStack`；跨轨批量用 `CompositeEdit`；拖拽聚合为单条记录 |
@@ -291,3 +291,19 @@ public interface DocumentEdit { String label(); void undo(); void redo(); boolea
 3. **未使用 `--add-exports`**：音色库经公共 API `MidiSystem.getSoundbank(File)` 加载，运行无需任何 JVM 参数。
 4. **播放调度时钟**：优先使用合成器微秒时钟（反射 `getMicrosecondPosition`），不可用时退回 `System.nanoTime()`。
 5. **主框架标题**：`midEditor — <文档名><*>`；窗口菜单选中项与活动文档同步。
+## 10. v1.1 交互修订
+
+| 问题 | 实现 |
+| --- | --- |
+| 音轨添加/切换不易发现 | 新增顶层「音轨(T)」菜单；子窗口传输条新增「＋轨 / －轨」；音轨头**任意位置单击**即切换（双击名称重命名）；添加/切换后自动滚动到对应泳道 |
+| 单击平行线试听 | `SynthService.audition(...)`：program/CC7/CC10 + note-on，定时 note-off；`PianoRollCanvas` 在"按下未拖动"释放时触发；任何文档播放期间不叠加试听 |
+| 新建平行线默认时长 | `GridSettings.NoteLength`（跟随网格 / 1/4 / 1/8 / 1/16 / 1/32 / 1 小节 / 自定义 tick）；右键空白菜单与「网格设置」面板均可修改，1 小节按文档拍号计算 |
+| Y 轴钢琴键盘标尺 | `PianoKeysColumn` 位于行头最左，逐泳道按各自音域绘制白/黑键与 C 音标注；与 GM 音色无关；视图→键盘标尺（Ctrl+K）或网格设置面板可显隐 |
+| 保存/重开后音高偏移 | 根因：①重新打开时每轨音域窗口被 `autoRangeFromNotes` 重定位；②弯音/RPN 调音等通道事件保存时被丢弃；③合成器通道残留上一个文档的调音状态。修复：写入 `mideditor:yRange=` 标记并恢复；`RawChannelEvent` 保留弯音/RPN/踏板等并参与回放；每次播放/试听前 `resetAllChannels()`（弯音回中、RPN 归零），seek 时重放目标位置前的状态事件 |
+| 平行线长度≠实际时长 / 相邻线一起响 | 根因：`SoftSynthesizer#getMicrosecondPosition` 属未导出包，反射被拒 → `micros()` 返回 -1，引擎退化为把 260ms lookahead 内的事件**立即发送**。修复：jar 清单加 `Add-Exports: java.desktop/com.sun.media.sound`（surefire/launch.json/app:run 同步加 `--add-exports`）恢复采样级时间戳调度；无时钟时降为 8ms 前瞻 + 3ms 轮询；note-off 额外提前 400µs，保证同 tick 的下一条 note-on 不被误杀 |
+| 保存到已存在文件无提示 | `DocumentFileService.chooseSave` 增加覆盖判定：目标存在时弹出「确认覆盖」（是/否），选择“否”则取消；目标为目录时给出提示。`ensureOverwriteAllowed(Path, Supplier<Boolean>)` 抽成可测试函数 |
+| 停止后重新播放，播放头瞬移数小节 | 根因：Gervill 的 `getMicrosecondPosition()` 是「已渲染帧数」，空闲后会一次性追帧（实测 16384 帧 ≈ 371ms），播放头以它为锚点就会瞬间多出数百 ms。修复：播放头/自动暂停等一律用单调的 `System.nanoTime()` 计算 elapsed；事件时间戳改为每条发送时「当前合成器时钟 + 剩余延迟」，不再使用固定合成器锚点 |
+| Ctrl+S 无反应 | 根因：`chooseSave` 里 `path` 被重新赋值后又进 lambda（非 effectively final），VS Code 的 ECJ 把带错误的类写进 `target/classes`，Maven 增量编译又跳过了它 → 运行时抛 `Error: Unresolved compilation problems`，而 `CommandRouter` 只 `catch (Exception)` 所以静默。修复：拆出 `ensureMidiExtension` 使 lambda 捕获只读变量；`CommandRouter` 改 `catch (Throwable)` 并记录日志；补 `Ctrl+Y` 重做、`F12` 另存为别名与对应测试。验证请用 `mvn clean test/package`，避免旧/ECJ 类残留 |
+
+另：Maven 安装在 `D:\Tools\apache-maven-3.10.1`，已写入用户级 `Path` / `MAVEN_HOME`；仓库内的 Maven Wrapper（`mvnw*`、`.mvn/`）与临时构建脚本已删除。
+测试增至 20 项（含默认时长、键盘标尺、试听事件投递、音域/弯音保真、同 tick 的 note-off 顺序与音频时钟可用性）。

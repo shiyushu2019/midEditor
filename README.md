@@ -5,19 +5,25 @@
 
 ## 运行
 
+Maven 已安装到 `D:\Tools\apache-maven-3.10.1`，用户级 `Path` 已包含其 `bin`（新开的终端生效）。
+
 ```powershell
-.\mvnw.cmd package
+mvn clean package
 java -jar target\mid-editor-1.0.0-SNAPSHOT.jar
 ```
 
-或直接：
+若当前终端还是旧会话（PATH 未刷新），新开一个终端即可；仍不行时确认用户级环境变量已生效（必要时重启 VS Code）。
+
+直接编译运行：
 
 ```powershell
-.\mvnw.cmd -q compile
+mvn -q compile
 java -cp target\classes com.example.mideditor.MidiEditorApp
 ```
 
-要求 JDK 21（已在 JDK 21.0.11 上验证）。
+要求 JDK 21（已在 JDK 21.0.11 上验证）。VS Code 的任务（maven: compile/test/package/clean）也已改为调用 `mvn`。
+
+> 若用 `java -cp target\classes` 方式运行，请加 `--add-exports java.desktop/com.sun.media.sound=ALL-UNNAMED`（打包出的 jar 已在清单里带上该导出，无需额外参数）。没有该参数时播放仍可用，但调度会回退到 8ms 精度。
 
 ## 音色（真采样，非单正弦）
 
@@ -30,13 +36,20 @@ java -cp target\classes com.example.mideditor.MidiEditorApp
 
 | 操作 | 方式 |
 | --- | --- |
-| 新建 / 打开 / 保存 / 另存为 | Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S |
-| 撤销 / 重做 | Ctrl+Z / Ctrl+Shift+Z（**按文档隔离**） |
+| 新建 / 打开 / 保存 / 另存为 | Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S（或 F12） |
+| 撤销 / 重做 | Ctrl+Z / Ctrl+Shift+Z 或 Ctrl+Y（**按文档隔离**） |
 | 剪切 / 复制 / 粘贴 / 删除 / 全选 | Ctrl+X / Ctrl+C / Ctrl+V / Delete / Ctrl+A |
 | 播放 / 暂停 | 空格（文本输入时不会误触发） |
 | 停止 / 回到开头 | Ctrl+空格 / Ctrl+Home |
 | 循环 / 节拍器 | Ctrl+L / Ctrl+M |
 | 添加平行线 | 坐标空白处右键 → 添加平行线；或双击空白处 |
+| 试听平行线 | 单击一条平行线（不拖动）即按其音轨音色发声 |
+| 新建默认长度 | 右键空白 → 新平行线默认长度；或 视图 → 网格设置 → 新建平行线默认长度 |
+| 添加/删除音轨 | 音轨菜单 / 工具栏 + / 子窗口底部「＋轨」「－轨」/ 左侧音轨面板 |
+| 切换活动音轨 | 单击音轨头任意位置（双击名称可重命名）、左侧音轨列表或音轨菜单上/下移 |
+| 键盘标尺（Y 轴） | 视图 → 键盘标尺（Ctrl+K），或 网格设置面板勾选；与音色无关，总是弹琴键盘 |
+| 文档窗口最大化 | 新建/打开文档后子窗口默认在 MDI 客户区内最大化；「窗口 → 层叠/平铺」或「全部还原」取消最大化 |
+| 覆盖保护 | 另存为 / 导出目标文件已存在时，会先弹出「确认覆盖」；选择“否”则取消保存 |
 | 删除 / 拆分 / 移动 / 拉长缩短 / 力度 | 平行线上右键，或 Alt+↑↓←→ / Alt+Shift+←→ |
 | 插入休止 / 删除休止 | 空白处右键（后续平行线整体右移 / 左移补齐） |
 | 框选 | 在空白处左键拖出矩形 |
@@ -46,7 +59,6 @@ java -cp target\classes com.example.mideditor.MidiEditorApp
 
 「视图」菜单可显示/隐藏 7 个工具窗口（音轨、乐器、混音器、输出、诊断、属性、网格设置），
 并可层叠/平铺/最小化/还原 MDI 子窗口；「窗口」菜单列出所有文档用于切换活动文档。
-
 ## 架构
 
 ```
@@ -63,16 +75,17 @@ MainFrame                    标题栏 / 菜单栏 / 工具栏 / 状态栏 / 停
 - **播放**：Gervill + lookahead 调度线程（20ms 唤醒、260ms 前瞻），事件带合成器时钟绝对时间戳；
   播放头由音频时钟换算 tick，播放中 seek 会静音后重新锚定，无缝续播。
 - **MIDI 文件**：`javax.sound.midi` 解析/生成（不手写解析器），保留音轨名、乐器、音量、声像、速度、拍号。
+- **往返保真**：弯音（Pitch Bend）、RPN 粗/微调音、延音踏板等通道事件会原样保存并参与回放；每轨可见音域窗口也会写入（自定义 text meta），重新打开后音高与视图不漂移。
 
 详细设计见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ## 验证
 
 ```powershell
-.\mvnw.cmd test
+mvn test
 ```
 
-15 项测试覆盖：tick/微秒换算、.mid 往返、撤销栈隔离、命令快捷键与启用态、
+24 项测试覆盖：tick/微秒换算、.mid 往返（含音域窗口与弯音/RPN 调音）、覆盖确认、撤销栈隔离、命令快捷键与启用态、
 MDI 启动为空 / 多文档路由 / 编辑工作流（添加·拆分·移动·拉长·量化·力度·休止·剪贴板·撤销）、
 播放引擎时钟前进与 seek。
 

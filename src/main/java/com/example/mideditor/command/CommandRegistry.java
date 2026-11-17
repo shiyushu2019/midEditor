@@ -39,6 +39,13 @@ public final class CommandRegistry {
         }
     }
 
+    /** 为命令追加备用快捷键（菜单仍只显示主快捷键，例如 Ctrl+Y 与 Ctrl+Shift+Z）。 */
+    public void bindAlias(String commandId, KeyStroke stroke) {
+        if (stroke != null && commands.containsKey(commandId)) {
+            inputMap.put(stroke, commandId);
+        }
+    }
+
     void setRouter(CommandRouter router) {
         this.router = router;
     }

@@ -2,12 +2,17 @@ package com.example.mideditor.ui.pianoroll;
 
 import java.awt.Point;
 
+import javax.swing.ButtonGroup;
 import javax.swing.JMenu;
 import javax.swing.JMenuItem;
+import javax.swing.JOptionPane;
 import javax.swing.JPopupMenu;
+import javax.swing.JRadioButtonMenuItem;
 
 import com.example.mideditor.command.AppCommandIds;
 import com.example.mideditor.document.MidiDocumentView;
+import com.example.mideditor.domain.GridSettings;
+import com.example.mideditor.ui.theme.Theme;
 
 /** 「平行线」右键菜单。 */
 final class PianoRollContextMenu {
@@ -55,6 +60,7 @@ final class PianoRollContextMenu {
             menu.add(title);
             menu.addSeparator();
             menu.add(registry.action(AppCommandIds.NOTE_ADD));
+            menu.add(noteLengthMenu(host));
             menu.add(registry.action(AppCommandIds.REST_INSERT));
             menu.add(registry.action(AppCommandIds.REST_DELETE));
             menu.addSeparator();
@@ -62,5 +68,46 @@ final class PianoRollContextMenu {
             menu.add(registry.action(AppCommandIds.EDIT_SELECT_ALL));
         }
         menu.show(canvas, point.x, point.y);
+    }
+
+    /** 新建平行线默认长度（与「网格设置」面板同步）。 */
+    private static JMenu noteLengthMenu(MidiDocumentView host) {
+        JMenu menu = new JMenu("新平行线默认长度");
+        menu.setFont(Theme.BASE_FONT);
+        ButtonGroup group = new ButtonGroup();
+        for (GridSettings.NoteLength length : GridSettings.NoteLength.values()) {
+            if (length == GridSettings.NoteLength.CUSTOM) {
+                continue;
+            }
+            JRadioButtonMenuItem item = new JRadioButtonMenuItem(length.label(),
+                    host.grid().noteLength() == length);
+            item.setFont(Theme.BASE_FONT);
+            item.addActionListener(e -> {
+                host.grid().setNoteLength(length);
+                host.app().refreshApplicationState();
+            });
+            group.add(item);
+            menu.add(item);
+        }
+        menu.addSeparator();
+        JMenuItem custom = new JMenuItem("自定义 tick…");
+        custom.setFont(Theme.BASE_FONT);
+        custom.addActionListener(e -> {
+            String input = JOptionPane.showInputDialog(host,
+                    "新建平行线的默认长度（tick）", String.valueOf(host.grid().customNoteTicks()));
+            if (input == null) {
+                return;
+            }
+            try {
+                long ticks = Long.parseLong(input.trim());
+                host.grid().setCustomNoteTicks(ticks);
+                host.grid().setNoteLength(GridSettings.NoteLength.CUSTOM);
+                host.app().refreshApplicationState();
+            } catch (NumberFormatException ignored) {
+                // 忽略非法输入
+            }
+        });
+        menu.add(custom);
+        return menu;
     }
 }

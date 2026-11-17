@@ -94,8 +94,26 @@ public final class MidiDocumentView extends DocumentView {
             return;
         }
         activeTrack = track;
+        int index = document().tracks().indexOf(track);
+        if (index >= 0) {
+            pianoRoll.scrollToLane(index);
+        }
         pianoRoll.refreshPitchLabels();
         pianoRoll.repaint();
+        app().refreshApplicationState();
+    }
+
+    public boolean keyboardRulerVisible() {
+        return pianoRoll.keyboardRulerVisible();
+    }
+
+    public void setKeyboardRulerVisible(boolean visible) {
+        pianoRoll.setKeyboardRulerVisible(visible);
+        app().refreshApplicationState();
+    }
+
+    public void toggleKeyboardRuler() {
+        pianoRoll.toggleKeyboardRuler();
         app().refreshApplicationState();
     }
 
@@ -344,14 +362,39 @@ public final class MidiDocumentView extends DocumentView {
         if (track == null) {
             return;
         }
-        long step = Math.max(1, grid.step(document().ppq()));
-        long duration = grid.snapEnabled() ? step : Math.max(1, document().ppq() / 4L);
+        long duration = defaultNoteDuration();
         edit(track, "添加平行线", () -> {
             Note note = new Note(pitch, startTick, duration, 100);
             track.addNote(note);
             selection().setSingle(note);
         });
         pianoRoll.scrollToTick(startTick);
+    }
+
+    /** 新建平行线的默认长度：支持「跟随网格 / 固定拍值 / 1 小节 / 自定义 tick」。 */
+    public long defaultNoteDuration() {
+        if (grid.noteLength() == GridSettings.NoteLength.BAR) {
+            return Math.max(1, TimeMath.barTicks(document(), pendingAddTick));
+        }
+        return grid.newNoteDuration(document().ppq());
+    }
+
+    /** 单击平行线试听：立即用该音轨的音色发一声，播放中不叠加。 */
+    public void auditionNote(Track track, Note note) {
+        if (track == null || note == null || !app().synth().available()) {
+            return;
+        }
+        PlaybackEngine engine = app().playback();
+        if (engine.isPlaying()) {
+            // 任何文档正在播放时不再叠加试听，避免干扰正在使用的通道 / 音色
+            return;
+        }
+        long micros = document().tempoMap().microsAtTick(note.endTick())
+                - document().tempoMap().microsAtTick(note.startTick());
+        int millis = (int) Math.max(120, Math.min(1500, micros / 1000));
+        int channel = track.drumKit() ? 9 : track.channel();
+        app().synth().audition(channel, track.program(), note.pitch(), note.velocity(),
+                track.volume(), track.pan(), millis);
     }
 
     public void deleteSelection() {
@@ -738,6 +781,7 @@ public final class MidiDocumentView extends DocumentView {
                 () -> document().removeTrack(track)));
         setActiveTrack(track);
         afterEdit(true);
+        pianoRoll.scrollToLane(document().tracks().indexOf(track));
     }
 
     public void removeTrack(Track track) {
@@ -763,6 +807,7 @@ public final class MidiDocumentView extends DocumentView {
                 () -> document().moveTrack(index, target),
                 () -> document().moveTrack(target, index)));
         afterEdit(true);
+        pianoRoll.scrollToLane(target);
     }
 
     public void toggleMute(Track track) {

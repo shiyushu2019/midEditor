@@ -11,6 +11,7 @@ import java.util.List;
 
 import javax.swing.JDesktopPane;
 import javax.swing.JInternalFrame;
+import javax.swing.SwingUtilities;
 
 import com.example.mideditor.document.DocumentSession;
 import com.example.mideditor.document.MidiDocumentView;
@@ -39,7 +40,22 @@ public final class MdiWorkspace extends JDesktopPane {
         } catch (Exception ignored) {
             // 忽略
         }
+        // 文档窗口默认在 MDI 客户区内最大化（与旧版 Word/VS 的文档窗口行为一致）
+        maximizeFrame(frame);
         return frame;
+    }
+
+    private void maximizeFrame(MdiChildFrame frame) {
+        if (getWidth() <= 0 || getHeight() <= 0) {
+            // 桌面尚未完成布局（例如测试中窗口还未显示）：等首次布局后再最大化
+            SwingUtilities.invokeLater(() -> {
+                if (getWidth() > 0 && getHeight() > 0) {
+                    safeMaximum(frame, true);
+                }
+            });
+            return;
+        }
+        safeMaximum(frame, true);
     }
 
     private java.awt.Rectangle nextBounds() {
@@ -134,6 +150,7 @@ public final class MdiWorkspace extends JDesktopPane {
     public void restoreAll() {
         for (MdiChildFrame frame : documentFrames()) {
             safeIcon(frame, false);
+            safeMaximum(frame, false);
         }
         List<MdiChildFrame> frames = documentFrames();
         if (!frames.isEmpty()) {

@@ -119,6 +119,49 @@ public final class SynthService implements AutoCloseable {
         }
     }
 
+    /**
+     * 重置单个通道的"会残留"状态：弯音回中、RPN 调音回默认、弯音范围 2 半音、
+     * 延音/调制/表情归位。避免上一个文档的调音把后续文档整体移调。
+     */
+    public synchronized void resetChannel(int channel) {
+        int ch = Math.max(0, Math.min(15, channel));
+        try {
+            send(new ShortMessage(ShortMessage.PITCH_BEND, ch, 0, 64));
+            // RPN 0,0 = 弯音范围 = 2 半音
+            send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 101, 0));
+            send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 100, 0));
+            send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 6, 2));
+            send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 38, 0));
+            // RPN 0,1 = 微调 = 中心
+            send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 101, 0));
+            send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 100, 1));
+            send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 6, 64));
+            send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 38, 0));
+            // RPN 0,2 = 粗调 = 中心
+            send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 101, 0));
+            send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 100, 2));
+            send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 6, 64));
+            send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 38, 0));
+            // 退出 RPN
+            send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 101, 127));
+            send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 100, 127));
+            send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 64, 0));
+            send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 1, 0));
+            send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 11, 127));
+            send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 120, 0));
+            send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 123, 0));
+        } catch (Exception ignored) {
+            // 忽略
+        }
+    }
+
+    /** 播放开始前清空所有通道的残留调音/弯音/踏板状态。 */
+    public synchronized void resetAllChannels() {
+        for (int ch = 0; ch < 16; ch++) {
+            resetChannel(ch);
+        }
+    }
+
     public synchronized void send(ShortMessage message) {
         send(message, -1);
     }
@@ -152,8 +195,15 @@ public final class SynthService implements AutoCloseable {
             Object value = microsMethod.invoke(synth);
             return value instanceof Long l ? l : -1;
         } catch (Exception e) {
+            // 模块未导出时会抛 IllegalAccessException：永久降级，避免反复反射
+            microsMethod = null;
             return -1;
         }
+    }
+
+    /** 音频时钟是否可用（用于诊断面板显示）。 */
+    public boolean clockAvailable() {
+        return micros() >= 0;
     }
 
     public void allNotesOff() {
@@ -162,6 +212,34 @@ public final class SynthService implements AutoCloseable {
                 send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 123, 0));
                 send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 120, 0));
             }
+        } catch (Exception ignored) {
+            // 忽略
+        }
+    }
+
+    /** 试听单个音符（单击平行线时使用）：立即发声，到时自动 note-off。 */
+    public void audition(int channel, int program, int pitch, int velocity,
+            int volume, int pan, long millis) {
+        if (!available || receiver == null) {
+            return;
+        }
+        int ch = Math.max(0, Math.min(15, channel));
+        try {
+            resetChannel(ch);
+            send(new ShortMessage(ShortMessage.PROGRAM_CHANGE, ch, Math.max(0, Math.min(127, program)), 0));
+            send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 7, Math.max(0, Math.min(127, volume))));
+            send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 10, Math.max(0, Math.min(127, pan))));
+            send(new ShortMessage(ShortMessage.NOTE_ON, ch,
+                    Math.max(0, Math.min(127, pitch)), Math.max(1, Math.min(127, velocity))));
+            javax.swing.Timer timer = new javax.swing.Timer((int) Math.max(60, millis), e -> {
+                try {
+                    send(new ShortMessage(ShortMessage.NOTE_OFF, ch, Math.max(0, Math.min(127, pitch)), 0));
+                } catch (Exception ignored) {
+                    // 忽略
+                }
+            });
+            timer.setRepeats(false);
+            timer.start();
         } catch (Exception ignored) {
             // 忽略
         }

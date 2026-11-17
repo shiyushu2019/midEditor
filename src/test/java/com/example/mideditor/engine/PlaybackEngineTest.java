@@ -1,17 +1,18 @@
 package com.example.mideditor.engine;
 
-import com.example.mideditor.document.MidiDocument;
-import com.example.mideditor.domain.Note;
-import com.example.mideditor.domain.Track;
-import org.junit.jupiter.api.Test;
-
-import javax.sound.midi.ShortMessage;
 import java.awt.Color;
 import java.util.List;
+
+import javax.sound.midi.ShortMessage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import org.junit.jupiter.api.Test;
+
+import com.example.mideditor.document.MidiDocument;
+import com.example.mideditor.domain.Note;
+import com.example.mideditor.domain.Track;
 
 class PlaybackEngineTest {
 
@@ -49,11 +50,58 @@ class PlaybackEngineTest {
     }
 
     @Test
+    void sameTickNoteOffPrecedesNextNoteOn() {
+        MidiDocument document = new MidiDocument(480);
+        Track track = new Track("首尾相接", 0, 0, Color.BLUE);
+        track.addNote(new Note(60, 0, 480, 100));
+        track.addNote(new Note(60, 480, 480, 100));
+        document.addTrack(track);
+
+        PlaybackPlan plan = PlaybackPlan.build(document, false);
+        List<PlaybackPlan.Event> atBoundary = plan.events().stream()
+                .filter(e -> e.tick() == 480)
+                .toList();
+        assertEquals(2, atBoundary.size());
+        assertEquals(ShortMessage.NOTE_OFF, atBoundary.get(0).command(), "先停止上一条平行线");
+        assertEquals(ShortMessage.NOTE_ON, atBoundary.get(1).command(), "再开始下一条平行线");
+    }
+
+    @Test
+    void restartAfterStopDoesNotJumpPlayhead() throws Exception {
+        SynthService synth = new SynthService();
+        synth.open();
+        try {
+            assumeTrue(synth.available(), "当前环境无可用音频设备");
+            MidiDocument document = new MidiDocument(480);
+            Track track = new Track("长音", 0, 0, Color.BLUE);
+            track.addNote(new Note(60, 0, 9600, 100));
+            document.addTrack(track);
+            PlaybackPlan plan = PlaybackPlan.build(document, false);
+
+            PlaybackEngine engine = new PlaybackEngine(synth);
+            engine.play(this, plan, 0, false, new PlaybackEngine.LoopRange(0, 0));
+            Thread.sleep(120);
+            engine.stop();
+            Thread.sleep(400);
+
+            engine.play(this, plan, 0, false, new PlaybackEngine.LoopRange(0, 0));
+            long tick = engine.currentTick();
+            assertTrue(tick < 120, "停止后重新播放不应跳变，实际 tick=" + tick);
+            Thread.sleep(120);
+            assertTrue(engine.currentTick() < 600, "重新播放后应正常推进");
+            engine.stop();
+        } finally {
+            synth.close();
+        }
+    }
+
+    @Test
     void schedulerAdvancesClockAndSupportsSeek() throws Exception {
         SynthService synth = new SynthService();
         synth.open();
         try {
             assumeTrue(synth.available(), "当前环境无可用音频设备");
+            assertTrue(synth.micros() >= 0, "surefire 应通过 --add-exports 导出 com.sun.media.sound 以取得音频时钟");
             PlaybackEngine engine = new PlaybackEngine(synth);
             PlaybackPlan plan = PlaybackPlan.build(demoDocument(), false);
             engine.play(this, plan, 0, false, new PlaybackEngine.LoopRange(0, 0));

@@ -1,12 +1,13 @@
 package com.example.mideditor.command;
 
-import com.example.mideditor.app.AppContext;
-import com.example.mideditor.ui.dock.DockIds;
-
-import javax.swing.JOptionPane;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.util.function.Predicate;
+
+import javax.swing.JOptionPane;
+
+import com.example.mideditor.app.AppContext;
+import com.example.mideditor.ui.dock.DockIds;
 
 /** 视图 / 窗口 / 帮助命令。 */
 final class ViewCommands {
@@ -83,6 +84,12 @@ final class ViewCommands {
                     ctx.app().refreshApplicationState();
                 }, CommandContext::hasDocument,
                 ctx -> ctx.hasDocument() && ctx.document().followPlayhead()));
+
+        registry.register(new AppCommand(AppCommandIds.VIEW_KEYBOARD_RULER, "键盘标尺", CommandScope.DOCUMENT,
+                FileCommands.key(KeyEvent.VK_K, InputEvent.CTRL_DOWN_MASK),
+                ctx -> ctx.document().toggleKeyboardRuler(),
+                CommandContext::hasDocument,
+                ctx -> ctx.hasDocument() && ctx.document().keyboardRulerVisible()));
 
         // ---- 窗口
         Predicate<CommandContext> hasSessions = ctx -> ctx.app().documents().sessionCount() > 0;

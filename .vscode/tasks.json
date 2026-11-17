@@ -4,7 +4,7 @@
     {
       "label": "maven: compile",
       "type": "shell",
-      "command": "${workspaceFolder}\\.mvnw.cmd",
+      "command": "mvn",
       "args": ["-B", "compile"],
       "group": {
         "kind": "build",
@@ -19,7 +19,7 @@
     {
       "label": "maven: test",
       "type": "shell",
-      "command": "${workspaceFolder}\\.mvnw.cmd",
+      "command": "mvn",
       "args": ["-B", "test"],
       "group": {
         "kind": "test",
@@ -35,7 +35,7 @@
       "label": "app: run",
       "type": "shell",
       "command": "java",
-      "args": ["-cp", "${workspaceFolder}\\target\\classes", "com.example.mideditor.MidiEditorApp"],
+      "args": ["--add-exports", "java.desktop/com.sun.media.sound=ALL-UNNAMED", "-cp", "${workspaceFolder}\\target\\classes", "com.example.mideditor.MidiEditorApp"],
       "dependsOn": "maven: compile",
       "problemMatcher": [],
       "presentation": {
@@ -46,7 +46,7 @@
     {
       "label": "maven: package",
       "type": "shell",
-      "command": "${workspaceFolder}\\.mvnw.cmd",
+      "command": "mvn",
       "args": ["-B", "package"],
       "problemMatcher": [],
       "presentation": {
@@ -57,7 +57,7 @@
     {
       "label": "maven: clean",
       "type": "shell",
-      "command": "${workspaceFolder}\\.mvnw.cmd",
+      "command": "mvn",
       "args": ["-B", "clean"],
       "problemMatcher": []
     }

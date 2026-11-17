@@ -43,8 +43,9 @@ public final class CommandRouter {
         }
         try {
             command.handler().accept(context);
-        } catch (Exception e) {
-            Log.error("命令 " + id + " 执行失败：" + e);
+        } catch (Throwable t) {
+            // 包含 Error（例如 ECJ 生成的 Unresolved compilation problems），必须暴露而不是静默失败
+            Log.error("命令 " + id + " 执行失败：" + t);
         }
         refreshStates();
     }
