@@ -1,5 +1,15 @@
 package com.example.mideditor.app;
 
+import java.awt.BorderLayout;
+import java.awt.Dimension;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
+
+import javax.swing.ButtonGroup;
+import javax.swing.JFrame;
+import javax.swing.JMenu;
+import javax.swing.JRadioButtonMenuItem;
+
 import com.example.mideditor.command.AppCommandIds;
 import com.example.mideditor.document.DocumentSession;
 import com.example.mideditor.document.MidiDocumentView;
@@ -12,15 +22,6 @@ import com.example.mideditor.ui.frame.StatusBar;
 import com.example.mideditor.ui.frame.ToolBarBuilder;
 import com.example.mideditor.ui.theme.Theme;
 import com.example.mideditor.ui.tools.ToolPanels;
-
-import javax.swing.ButtonGroup;
-import javax.swing.JFrame;
-import javax.swing.JMenu;
-import javax.swing.JRadioButtonMenuItem;
-import java.awt.BorderLayout;
-import java.awt.Dimension;
-import java.awt.event.WindowAdapter;
-import java.awt.event.WindowEvent;
 
 /** 主框架窗口：标题栏 / 菜单栏 / 工具栏 / 停靠区 + MDI 工作区 / 状态栏。 */
 public final class MainFrame extends JFrame {
@@ -54,6 +55,8 @@ public final class MainFrame extends JFrame {
 
         app.setDock(dock);
         app.setMainFrame(this);
+        AltReleaseWheelFix.install(this);
+        installFileDrop();
         ToolPanels.install(app, dock);
 
         app.documents().addChangeListener(this::rebuildWindowMenu);
@@ -72,6 +75,15 @@ public final class MainFrame extends JFrame {
 
     public MdiWorkspace workspace() {
         return workspace;
+    }
+
+    /** 允许把 .mid 文件直接拖进窗口打开（窗口任意位置都可放下）。 */
+    private void installFileDrop() {
+        FileDropHandler handler = new FileDropHandler(app);
+        setTransferHandler(handler);
+        getRootPane().setTransferHandler(handler);
+        workspace.setTransferHandler(handler);
+        dock.setTransferHandler(handler);
     }
 
     public StatusBar statusBar() {

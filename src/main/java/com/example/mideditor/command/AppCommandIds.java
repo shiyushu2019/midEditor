@@ -64,6 +64,11 @@ public final class AppCommandIds {
     public static final String VIEW_TOGGLE_GRID = "view.toggleGrid";
     public static final String VIEW_FOLLOW_PLAYHEAD = "view.followPlayhead";
     public static final String VIEW_KEYBOARD_RULER = "view.keyboardRuler";
+    public static final String VIEW_PITCH_ZOOM_IN = "view.pitchZoomIn";
+    public static final String VIEW_PITCH_ZOOM_OUT = "view.pitchZoomOut";
+    public static final String VIEW_PITCH_ZOOM_RESET = "view.pitchZoomReset";
+    public static final String VIEW_PITCH_FIT = "view.pitchFit";
+    public static final String VIEW_PITCH_SHOW_ALL = "view.pitchShowAll";
 
     public static final String WINDOW_CASCADE = "window.cascade";
     public static final String WINDOW_TILE = "window.tile";

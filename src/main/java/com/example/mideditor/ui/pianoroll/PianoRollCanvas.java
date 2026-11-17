@@ -42,7 +42,6 @@ public final class PianoRollCanvas extends JComponent {
         setOpaque(true);
         setBackground(Theme.CANVAS_BACKGROUND);
         setFocusable(true);
-        setToolTipText("");
         Handler handler = new Handler();
         addMouseListener(handler);
         addMouseMotionListener(handler);
@@ -70,27 +69,6 @@ public final class PianoRollCanvas extends JComponent {
         } finally {
             g2.dispose();
         }
-    }
-
-    @Override
-    public String getToolTipText(MouseEvent event) {
-        HitInfo hit = view.hitTest(event.getX(), event.getY());
-        if (hit.onNote()) {
-            Note note = hit.note();
-            return "平行线 · " + pitchName(note.pitch())
-                    + " · tick " + note.startTick() + " → " + note.endTick()
-                    + " · 长度 " + note.durationTicks()
-                    + " · 力度 " + note.velocity();
-        }
-        if (hit.onEmptySpace()) {
-            return "坐标空白处：右键添加平行线 · " + pitchName(hit.pitch()) + " · tick " + hit.tick();
-        }
-        return null;
-    }
-
-    private static String pitchName(int pitch) {
-        String[] names = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
-        return names[Math.floorMod(pitch, 12)] + (pitch / 12 - 1);
     }
 
     private final class Handler extends MouseAdapter {
@@ -236,28 +214,38 @@ public final class PianoRollCanvas extends JComponent {
 
         @Override
         public void mouseWheelMoved(MouseWheelEvent e) {
-            MidiDocument document = host().document();
-            int ppq = document.ppq();
-            if (e.isControlDown()) {
-                long anchorTick = view.timeline().tickAtX(e.getX(), ppq);
-                double factor = e.getWheelRotation() < 0 ? 1.15 : 1 / 1.15;
-                view.timeline().setPxPerQuarter(view.timeline().pxPerQuarter() * factor);
-                Rectangle visible = view.visibleRect();
-                int newX = view.timeline().xAtTick(anchorTick, ppq);
-                view.scrollPane().getViewport().setViewPosition(
-                        new Point(Math.max(0, visible.x + (newX - e.getX())), visible.y));
-                e.consume();
-            } else if (e.isAltDown()) {
-                HitInfo hit = view.hitTest(e.getX(), e.getY());
-                if (hit.track() != null) {
-                    int delta = e.getWheelRotation() > 0 ? -1 : 1;
-                    Track track = hit.track();
-                    track.setYRange(track.yRange().shifted(delta));
-                    view.refreshPitchLabels();
-                    view.repaint();
-                }
-                e.consume();
+            int notches = PianoRollView.wheelNotches(e);
+            if (notches == 0) {
+                return;
             }
+            HitInfo hit = view.hitTest(e.getX(), e.getY());
+            Track track = hit.track() != null ? hit.track() : host().activeTrack();
+            int lane = hit.laneIndex() >= 0 ? hit.laneIndex()
+                    : Math.max(0, host().document().tracks().indexOf(track));
+
+            if (e.isControlDown()) {
+                // Ctrl+滚轮：上下缩放（以鼠标处音高为锚点）
+                if (track != null) {
+                    view.wheelZoomPitch(track, lane, e.getY(), notches);
+                    host().setActiveTrack(track);
+                    host().app().refreshApplicationState();
+                }
+            } else if (e.isAltDown()) {
+                // Alt+滚轮：左右缩放（以鼠标处 tick 为锚点）
+                view.wheelZoomTime(e.getX(), notches);
+                host().app().refreshApplicationState();
+            } else if (e.isShiftDown()) {
+                // Shift+滚轮：左右滚动
+                view.wheelScrollTime(notches);
+            } else {
+                // 裸滚轮：上下滚动频谱
+                view.wheelScrollSpectrum(track, lane, notches);
+                if (track != null) {
+                    host().setActiveTrack(track);
+                }
+                host().app().refreshApplicationState();
+            }
+            e.consume();
         }
 
         private void openContextMenu(MouseEvent e, HitInfo hit) {

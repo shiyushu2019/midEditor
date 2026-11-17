@@ -44,6 +44,13 @@ class CommandRoutingTest {
         assertEquals(AppCommandIds.EDIT_REDO, map.get(KeyStroke.getKeyStroke(KeyEvent.VK_Y,
                 InputEvent.CTRL_DOWN_MASK)), "Ctrl+Y 也应重做");
 
+        assertEquals(AppCommandIds.VIEW_PITCH_ZOOM_IN, map.get(KeyStroke.getKeyStroke(KeyEvent.VK_EQUALS,
+                InputEvent.CTRL_DOWN_MASK | InputEvent.ALT_DOWN_MASK)), "Ctrl+Alt+= 放大频率轴");
+        assertEquals(AppCommandIds.VIEW_PITCH_ZOOM_OUT, map.get(KeyStroke.getKeyStroke(KeyEvent.VK_MINUS,
+                InputEvent.CTRL_DOWN_MASK | InputEvent.ALT_DOWN_MASK)), "Ctrl+Alt+- 缩小频率轴");
+        assertEquals(AppCommandIds.VIEW_PITCH_ZOOM_RESET, map.get(KeyStroke.getKeyStroke(KeyEvent.VK_0,
+                InputEvent.CTRL_DOWN_MASK | InputEvent.ALT_DOWN_MASK)), "Ctrl+Alt+0 重置音域");
+
         KeyStroke space = KeyStroke.getKeyStroke(KeyEvent.VK_SPACE, 0);
         assertEquals(AppCommandIds.PLAY_PLAY_PAUSE,
                 keyTarget.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).get(space));

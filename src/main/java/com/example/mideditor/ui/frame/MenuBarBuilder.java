@@ -175,6 +175,16 @@ public final class MenuBarBuilder {
         checkItem(menu, AppCommandIds.VIEW_TOGGLE_GRID, "显示网格");
         checkItem(menu, AppCommandIds.VIEW_FOLLOW_PLAYHEAD, "播放头跟随");
         checkItem(menu, AppCommandIds.VIEW_KEYBOARD_RULER, "键盘标尺(K)");
+
+        JMenu pitch = new JMenu("音域（频率轴）");
+        pitch.setFont(Theme.BASE_FONT);
+        item(pitch, AppCommandIds.VIEW_PITCH_ZOOM_IN, "放大（更少半音、行更高）");
+        item(pitch, AppCommandIds.VIEW_PITCH_ZOOM_OUT, "缩小（更多半音）");
+        item(pitch, AppCommandIds.VIEW_PITCH_ZOOM_RESET, "重置为 30 个半音");
+        pitch.addSeparator();
+        item(pitch, AppCommandIds.VIEW_PITCH_FIT, "适配本音轨平行线");
+        item(pitch, AppCommandIds.VIEW_PITCH_SHOW_ALL, "显示全部音域（128）");
+        menu.add(pitch);
         menu.addSeparator();
 
         JMenu arrange = new JMenu("子窗口排列");

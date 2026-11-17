@@ -117,6 +117,69 @@ public final class MidiDocumentView extends DocumentView {
         app().refreshApplicationState();
     }
 
+    // ---------------------------------------------------------------- 频率轴（音域）
+
+    /** 当前活动音轨可见的半音数（频率轴缩放级别）。 */
+    public int activePitchRows() {
+        return activeTrack == null ? 0 : activeTrack.pitchRows();
+    }
+
+    /** 放大音域：显示更少半音，每行更高。 */
+    public void pitchZoomIn() {
+        zoomPitchOfActiveTrack(true);
+    }
+
+    /** 缩小音域：显示更多半音（最多 128 = 全音域）。 */
+    public void pitchZoomOut() {
+        zoomPitchOfActiveTrack(false);
+    }
+
+    /** 重置为默认 30 个半音（全部音轨）。 */
+    public void pitchZoomReset() {
+        applyPitchRowsToAllTracks(Track.VISIBLE_ROWS);
+    }
+
+    /** 显示全部 128 个音高（全部音轨）。 */
+    public void pitchShowAll() {
+        applyPitchRowsToAllTracks(Track.MAX_PITCH_ROWS);
+    }
+
+    /** 音域适配本音轨已有平行线，保证全部可见。 */
+    public void pitchFitToNotes() {
+        if (activeTrack == null) {
+            return;
+        }
+        pianoRoll.fitPitchToNotes(activeTrack);
+        app().refreshApplicationState();
+    }
+
+    /** 设置音域行数（仅活动音轨）。 */
+    public void setPitchRows(int rows) {
+        if (activeTrack == null) {
+            return;
+        }
+        pianoRoll.setPitchRows(activeTrack, rows);
+        app().refreshApplicationState();
+    }
+
+    /** 设置音域行数（所有音轨）。 */
+    public void applyPitchRowsToAllTracks(int rows) {
+        for (Track track : document().tracks()) {
+            track.setPitchRows(rows);
+        }
+        pianoRoll.refreshPitchLabels();
+        pianoRoll.repaint();
+        app().refreshApplicationState();
+    }
+
+    private void zoomPitchOfActiveTrack(boolean in) {
+        if (activeTrack == null) {
+            return;
+        }
+        pianoRoll.zoomPitch(activeTrack, in);
+        app().refreshApplicationState();
+    }
+
     public long playheadTick() {
         return playheadTick;
     }
@@ -742,17 +805,14 @@ public final class MidiDocumentView extends DocumentView {
                 int x1 = pianoRoll.timeline().xAtTick(note.startTick(), ppq);
                 int x2 = pianoRoll.timeline().xAtTick(note.endTick(), ppq);
                 int y = pianoRoll.rowTop(track, i, note.pitch());
-                Rectangle noteRect = new Rectangle(x1, y, Math.max(3, x2 - x1), PitchRowHeight());
+                int rowPixels = Math.max(1, pianoRoll.rowBottom(track, i, note.pitch()) - y);
+                Rectangle noteRect = new Rectangle(x1, y, Math.max(3, x2 - x1), rowPixels);
                 if (rect.intersects(noteRect)) {
                     result.add(note);
                 }
             }
         }
         selection().setAll(result);
-    }
-
-    private static int PitchRowHeight() {
-        return com.example.mideditor.ui.theme.Theme.ROW_HEIGHT;
     }
 
     // ---------------------------------------------------------------- 速度 / 音轨

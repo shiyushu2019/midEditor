@@ -26,7 +26,33 @@ public final class PianoKeysColumn extends JComponent {
         this.view = view;
         setOpaque(true);
         setBackground(Theme.MENU_BACKGROUND);
-        setToolTipText("钢琴键盘标尺（视图 → 键盘标尺 可隐藏）");
+        addMouseWheelListener(this::onWheel);
+    }
+
+    /** 与画布完全一致的滚轮语义（键盘标尺属于频率轴，裸滚轮即滚动频谱）。 */
+    private void onWheel(java.awt.event.MouseWheelEvent e) {
+        int notches = PianoRollView.wheelNotches(e);
+        if (notches == 0) {
+            return;
+        }
+        Track track = trackAt(e.getY());
+        int lane = Math.max(0, view.laneIndexAt(e.getY()));
+        if (e.isControlDown()) {
+            view.wheelZoomPitch(track, lane, e.getY(), notches);
+        } else if (e.isAltDown()) {
+            var visible = view.visibleRect();
+            view.wheelZoomTime(visible.x + visible.width / 2, notches);
+        } else if (e.isShiftDown()) {
+            view.wheelScrollTime(notches);
+        } else {
+            view.wheelScrollSpectrum(track, lane, notches);
+        }
+        view.host().app().refreshApplicationState();
+        e.consume();
+    }
+
+    private Track trackAt(int y) {
+        return view.activeTrackOrNearest(y);
     }
 
     @Override
@@ -45,33 +71,36 @@ public final class PianoKeysColumn extends JComponent {
                 Track track = document.tracks().get(laneIndex);
                 int laneTop = view.laneTop(laneIndex);
                 PitchRange range = track.yRange();
-                int visibleRows = Math.min(range.rows(), Theme.LANE_ROWS);
-                int lowestVisible = Math.max(range.low(), range.high() - visibleRows);
                 boolean active = track == activeTrack;
+                int rowHeight = view.rowHeight(track);
 
-                for (int pitch = range.high() - 1; pitch >= lowestVisible; pitch--) {
+                for (int pitch = range.high() - 1; pitch >= range.low(); pitch--) {
                     int y = view.rowTop(track, laneIndex, pitch);
+                    int bottom = view.rowBottom(track, laneIndex, pitch);
+                    int height = Math.max(1, bottom - y);
                     boolean black = PianoRollPainter.isBlackKey(pitch);
                     g2.setColor(black ? Theme.KEY_BLACK : Theme.KEY_WHITE);
-                    g2.fillRect(0, y, width, Theme.ROW_HEIGHT);
+                    g2.fillRect(0, y, width, height);
                     if (pitch % 12 == 0) {
                         g2.setColor(black ? new Color(0x8A939F) : new Color(0x5C6875));
-                        g2.drawLine(0, y + Theme.ROW_HEIGHT - 1, width, y + Theme.ROW_HEIGHT - 1);
+                        g2.drawLine(0, bottom - 1, width, bottom - 1);
                     }
                 }
 
-                // 八度标注（每个 C 标注一次）
-                g2.setFont(Theme.SMALL_FONT.deriveFont(9f));
-                FontMetrics metrics = g2.getFontMetrics();
-                for (int pitch = lowestVisible; pitch < range.high(); pitch++) {
-                    if (pitch % 12 != 0) {
-                        continue;
+                // 八度标注（每个 C 标注一次；行高过小时省略以免重叠）
+                if (rowHeight >= 7) {
+                    g2.setFont(Theme.SMALL_FONT.deriveFont(Math.min(9f, rowHeight * 0.9f)));
+                    FontMetrics metrics = g2.getFontMetrics();
+                    for (int pitch = range.low(); pitch < range.high(); pitch++) {
+                        if (pitch % 12 != 0) {
+                            continue;
+                        }
+                        int y = view.rowTop(track, laneIndex, pitch);
+                        String label = "C" + (pitch / 12 - 1);
+                        g2.setColor(active ? new Color(0x1B3B6F) : new Color(0x3A4552));
+                        g2.drawString(label, width - 6 - metrics.stringWidth(label),
+                                y + Math.min(rowHeight - 1, metrics.getAscent() + 1));
                     }
-                    int y = view.rowTop(track, laneIndex, pitch);
-                    String label = "C" + (pitch / 12 - 1);
-                    g2.setColor(active ? new Color(0x1B3B6F) : new Color(0x3A4552));
-                    g2.drawString(label, width - 6 - metrics.stringWidth(label),
-                            y + Theme.ROW_HEIGHT - 1);
                 }
 
                 g2.setColor(Theme.LANE_SEPARATOR);

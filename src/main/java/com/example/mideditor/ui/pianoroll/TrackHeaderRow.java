@@ -176,14 +176,21 @@ public final class TrackHeaderRow extends JPanel {
         row4.add(smallLabel("声像"));
         row4.add(panSlider);
 
-        JButton up = tinyButton("▲", "音域上移（独立垂直滚动）");
-        JButton down = tinyButton("▼", "音域下移（独立垂直滚动）");
+        JButton up = tinyButton("▲", "音域上移一个半音");
+        JButton down = tinyButton("▼", "音域下移一个半音");
+        JButton zoomIn = tinyButton("＋", "放大音域：显示更少半音、每行更高");
+        JButton zoomOut = tinyButton("－", "缩小音域：显示更多半音，最多 128（全音域）");
         up.addActionListener(e -> shiftRange(1));
         down.addActionListener(e -> shiftRange(-1));
+        zoomIn.addActionListener(e -> zoomRange(true));
+        zoomOut.addActionListener(e -> zoomRange(false));
         rangeLabel = smallLabel("");
+        rangeLabel.setToolTipText("当前音轨可见音域");
         JPanel row5 = row();
         row5.add(up);
         row5.add(down);
+        row5.add(zoomIn);
+        row5.add(zoomOut);
         row5.add(rangeLabel);
 
         add(row1);
@@ -305,9 +312,16 @@ public final class TrackHeaderRow extends JPanel {
     }
 
     private void shiftRange(int delta) {
-        track.setYRange(track.yRange().shifted(delta));
+        track.shiftPitchRange(delta);
         refreshFromModel();
         view.repaint();
+    }
+
+    /** ＋＝放大（行数减少），－＝缩小（行数增加）。 */
+    private void zoomRange(boolean in) {
+        view.zoomPitch(track, in);
+        refreshFromModel();
+        host().app().refreshApplicationState();
     }
 
     void refreshFromModel() {
@@ -320,8 +334,11 @@ public final class TrackHeaderRow extends JPanel {
             programBox.setSelectedIndex(track.program());
             volumeSlider.setValue(track.volume());
             panSlider.setValue(track.pan());
-            rangeLabel.setText("Ch" + (track.channel() + 1) + " · 音域 "
-                    + track.yRange().low() + "-" + (track.yRange().high() - 1));
+            rangeLabel.setText(track.yRange().low() + "-" + (track.yRange().high() - 1)
+                    + " · " + track.pitchRows() + "行");
+            rangeLabel.setToolTipText("Ch" + (track.channel() + 1) + " 音域 "
+                    + track.yRange().low() + "-" + (track.yRange().high() - 1)
+                    + "（共 " + track.pitchRows() + " 个半音）");
             boolean active = host().activeTrack() == track;
             setBackground(active ? new Color(0xB9D2FE) : new Color(0xF7F8FA));
             setBorder(active

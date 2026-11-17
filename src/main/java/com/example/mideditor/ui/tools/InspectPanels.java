@@ -27,6 +27,7 @@ import com.example.mideditor.app.Refreshable;
 import com.example.mideditor.document.MidiDocumentView;
 import com.example.mideditor.domain.GridSettings;
 import com.example.mideditor.domain.Note;
+import com.example.mideditor.domain.Track;
 import com.example.mideditor.engine.PlaybackEngine;
 import com.example.mideditor.ui.theme.Theme;
 import com.example.mideditor.util.Log;
@@ -251,6 +252,10 @@ final class InspectPanels {
         private final JComboBox<GridSettings.NoteLength> noteLengthBox = new JComboBox<>(
                 GridSettings.NoteLength.values());
         private final JSpinner customTicksSpinner = new JSpinner(new SpinnerNumberModel(240, 1, 15360, 10));
+        private final JSpinner pitchRowsSpinner = new JSpinner(new SpinnerNumberModel(
+                Track.VISIBLE_ROWS, Track.MIN_PITCH_ROWS, Track.MAX_PITCH_ROWS, 1));
+        private final JCheckBox pitchAllTracksBox = new JCheckBox("应用到全部音轨");
+        private final JButton pitchFitButton = new JButton("适配本轨平行线");
         private final JLabel stepLabel = caption("步长：-");
         private boolean updating;
 
@@ -260,10 +265,13 @@ final class InspectPanels {
             setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
             setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
             resolutionBox.setFont(Theme.SMALL_FONT);
+            resolutionBox.setToolTipText("网格分辨率：网格线间距、吸附单位与默认平行线长度的基准");
             visibleBox.setFont(Theme.SMALL_FONT);
             visibleBox.setOpaque(false);
+            visibleBox.setToolTipText("显示/隐藏纵向网格线（Ctrl+G）");
             snapBox.setFont(Theme.SMALL_FONT);
             snapBox.setOpaque(false);
+            snapBox.setToolTipText("新建与拖拽平行线时吸附到网格");
             resolutionBox.addActionListener(e -> {
                 if (updating) {
                     return;
@@ -298,6 +306,7 @@ final class InspectPanels {
 
             keyboardRulerBox.setFont(Theme.SMALL_FONT);
             keyboardRulerBox.setOpaque(false);
+            keyboardRulerBox.setToolTipText("显示左侧键盘标尺（Ctrl+K）");
             keyboardRulerBox.addActionListener(e -> {
                 if (updating) {
                     return;
@@ -322,6 +331,7 @@ final class InspectPanels {
                 }
             });
             customTicksSpinner.setFont(Theme.SMALL_FONT);
+            customTicksSpinner.setToolTipText("自定义默认平行线长度（tick）");
             customTicksSpinner.addChangeListener(e -> {
                 if (updating) {
                     return;
@@ -347,6 +357,54 @@ final class InspectPanels {
             add(customRow);
             add(javax.swing.Box.createVerticalStrut(6));
             add(keyboardRulerBox);
+
+            add(javax.swing.Box.createVerticalStrut(6));
+            add(caption("频率轴（每轨可见半音数）"));
+            JPanel pitchRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 1));
+            pitchRow.setOpaque(false);
+            pitchRowsSpinner.setFont(Theme.SMALL_FONT);
+            pitchRowsSpinner.setPreferredSize(new Dimension(72, 22));
+            pitchRowsSpinner.setToolTipText("行数越少：放大音域（每行更高）；128 = 全部音高");
+            pitchRowsSpinner.addChangeListener(e -> {
+                if (updating) {
+                    return;
+                }
+                MidiDocumentView view = app.activeView();
+                if (view == null) {
+                    return;
+                }
+                int rows = ((Number) pitchRowsSpinner.getValue()).intValue();
+                if (pitchAllTracksBox.isSelected()) {
+                    view.applyPitchRowsToAllTracks(rows);
+                } else {
+                    view.setPitchRows(rows);
+                }
+            });
+            pitchRow.add(pitchRowsSpinner);
+            add(pitchRow);
+            pitchAllTracksBox.setFont(Theme.SMALL_FONT);
+            pitchAllTracksBox.setOpaque(false);
+            pitchAllTracksBox.setToolTipText("把当前半音行数应用到文档内所有音轨");
+            pitchAllTracksBox.addActionListener(e -> {
+                if (updating) {
+                    return;
+                }
+                MidiDocumentView view = app.activeView();
+                if (view != null && pitchAllTracksBox.isSelected()) {
+                    view.applyPitchRowsToAllTracks(((Number) pitchRowsSpinner.getValue()).intValue());
+                }
+            });
+            add(pitchAllTracksBox);
+            pitchFitButton.setFont(Theme.SMALL_FONT);
+            pitchFitButton.setToolTipText("自动定位音域，使本音轨所有平行线都可见");
+            pitchFitButton.addActionListener(e -> {
+                MidiDocumentView view = app.activeView();
+                if (view != null) {
+                    view.pitchFitToNotes();
+                    refresh();
+                }
+            });
+            add(pitchFitButton);
         }
 
         @Override
@@ -361,6 +419,9 @@ final class InspectPanels {
                 keyboardRulerBox.setEnabled(enabled);
                 noteLengthBox.setEnabled(enabled);
                 customTicksSpinner.setEnabled(enabled);
+                pitchRowsSpinner.setEnabled(enabled);
+                pitchAllTracksBox.setEnabled(enabled);
+                pitchFitButton.setEnabled(enabled);
                 if (!enabled) {
                     stepLabel.setText("步长：-");
                     return;
@@ -374,6 +435,10 @@ final class InspectPanels {
                 customTicksSpinner.setEnabled(view.grid().noteLength() == GridSettings.NoteLength.CUSTOM);
                 long step = view.grid().step(view.document().ppq());
                 stepLabel.setText(step > 0 ? "步长：" + step + " ticks" : "步长：关闭");
+                int pitchRows = view.activePitchRows();
+                if (pitchRows > 0) {
+                    pitchRowsSpinner.setValue(pitchRows);
+                }
             } finally {
                 updating = false;
             }

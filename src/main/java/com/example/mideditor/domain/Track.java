@@ -28,8 +28,10 @@ public final class Track {
     private final List<Note> notes = new ArrayList<>();
     private final List<RawChannelEvent> rawEvents = new ArrayList<>();
 
-    /** 每个音轨可见的音高行数（独立垂直滚动窗口）。 */
+    /** 每个音轨默认可见的音高行数（可用滚轮 / 视图菜单缩放）。 */
     public static final int VISIBLE_ROWS = 30;
+    public static final int MIN_PITCH_ROWS = PitchRange.MIN_ROWS;
+    public static final int MAX_PITCH_ROWS = PitchRange.MAX_ROWS;
 
     public Track(String name, int channel, int program, Color color) {
         this.id = java.util.UUID.randomUUID();
@@ -120,7 +122,25 @@ public final class Track {
     }
 
     public void setYRange(PitchRange yRange) {
-        this.yRange = yRange;
+        this.yRange = yRange == null ? PitchRange.centered(60, VISIBLE_ROWS) : yRange;
+    }
+
+    /** 当前可见半音数（频率轴缩放级别）。 */
+    public int pitchRows() {
+        return yRange.rows();
+    }
+
+    /** 设置可见半音数（以当前音域中心为锚点），返回实际生效的行数。 */
+    public int setPitchRows(int rows) {
+        yRange = yRange.withRows(rows);
+        return yRange.rows();
+    }
+
+    /** 音域上下滑动（滑动时行数不变）。 */
+    public void shiftPitchRange(int semitones) {
+        if (semitones != 0) {
+            yRange = yRange.shifted(semitones);
+        }
     }
 
     public List<Note> notes() {
@@ -180,7 +200,10 @@ public final class Track {
         return null;
     }
 
-    /** 根据已有平行线自动定位可见音域（导入 / 新建后调用）。 */
+    /**
+     * 根据已有平行线自动定位可见音域（导入 / 新建 / 「音域适配」后调用）。
+     * 音域跨度超过默认行数时会自动放大窗口，保证所有平行线都可见。
+     */
     public void autoRangeFromNotes() {
         if (notes.isEmpty()) {
             yRange = PitchRange.centered(60, VISIBLE_ROWS);
@@ -192,6 +215,6 @@ public final class Track {
             min = Math.min(min, note.pitch());
             max = Math.max(max, note.pitch());
         }
-        yRange = PitchRange.centered((min + max) / 2, VISIBLE_ROWS);
+        yRange = PitchRange.fitting(min, max, VISIBLE_ROWS);
     }
 }

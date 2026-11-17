@@ -60,16 +60,16 @@ final class PianoRollPainter {
         int laneTop = view.laneTop(laneIndex);
         int laneHeight = view.laneHeight();
         PitchRange range = track.yRange();
-        int visibleRows = Math.min(range.rows(), Theme.LANE_ROWS);
-        int lowestVisible = Math.max(range.low(), range.high() - visibleRows);
 
-        for (int pitch = range.high() - 1; pitch >= lowestVisible; pitch--) {
+        for (int pitch = range.high() - 1; pitch >= range.low(); pitch--) {
             int y = view.rowTop(track, laneIndex, pitch);
+            int bottom = view.rowBottom(track, laneIndex, pitch);
+            int rowHeight = Math.max(1, bottom - y);
             g.setColor(isBlackKey(pitch) ? Theme.ROW_BLACK : Theme.ROW_WHITE);
-            g.fillRect(clip.x, y, clip.width, Theme.ROW_HEIGHT);
+            g.fillRect(clip.x, y, clip.width, rowHeight);
             if (pitch % 12 == 0) {
                 g.setColor(Theme.ROW_OCTAVE_LINE);
-                g.drawLine(clip.x, y + Theme.ROW_HEIGHT - 1, clip.x + clip.width, y + Theme.ROW_HEIGHT - 1);
+                g.drawLine(clip.x, bottom - 1, clip.x + clip.width, bottom - 1);
             }
         }
 
@@ -130,10 +130,11 @@ final class PianoRollPainter {
         int x2 = timeline.xAtTick(note.endTick(), ppq);
         int width = Math.max(3, x2 - x1);
         int rowY = view.rowTop(track, laneIndex, note.pitch());
-        int maxThickness = Math.max(3, Theme.ROW_HEIGHT - 1);
-        int thickness = 2 + (int) Math.round(maxThickness * (note.velocity() / 127.0));
-        thickness = Math.min(thickness, maxThickness);
-        int y = rowY + (Theme.ROW_HEIGHT - thickness) / 2;
+        int rowHeight = Math.max(1, view.rowBottom(track, laneIndex, note.pitch()) - rowY);
+        int maxThickness = Math.max(1, rowHeight - 1);
+        int thickness = 1 + (int) Math.round((maxThickness - 1) * (note.velocity() / 127.0));
+        thickness = Math.max(1, Math.min(thickness, maxThickness));
+        int y = rowY + (rowHeight - thickness) / 2;
 
         Color base = track.color();
         boolean selected = host.selection().contains(note);

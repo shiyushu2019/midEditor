@@ -55,9 +55,35 @@ public final class ToolBarBuilder {
         JButton button = new JButton(action);
         button.setHideActionText(true);
         button.setFocusable(false);
-        Object label = action.getValue(Action.NAME);
-        button.setToolTipText(label == null ? commandId : label.toString());
+        button.setToolTipText(tooltip(action, commandId));
         button.setMargin(new java.awt.Insets(2, 6, 2, 6));
         bar.add(button);
+    }
+
+    /** 提示文字 = 命令名 + 快捷键，例如「新建（Ctrl+N）」。 */
+    private static String tooltip(Action action, String commandId) {
+        Object label = action.getValue(Action.NAME);
+        String text = label == null ? commandId : label.toString();
+        Object accelerator = action.getValue(Action.ACCELERATOR_KEY);
+        if (accelerator instanceof javax.swing.KeyStroke stroke && stroke.getKeyCode() != 0) {
+            text = text + "（" + acceleratorText(stroke) + "）";
+        }
+        return text;
+    }
+
+    private static String acceleratorText(javax.swing.KeyStroke stroke) {
+        StringBuilder text = new StringBuilder();
+        int modifiers = stroke.getModifiers();
+        if ((modifiers & java.awt.event.InputEvent.CTRL_DOWN_MASK) != 0) {
+            text.append("Ctrl+");
+        }
+        if ((modifiers & java.awt.event.InputEvent.SHIFT_DOWN_MASK) != 0) {
+            text.append("Shift+");
+        }
+        if ((modifiers & java.awt.event.InputEvent.ALT_DOWN_MASK) != 0) {
+            text.append("Alt+");
+        }
+        text.append(java.awt.event.KeyEvent.getKeyText(stroke.getKeyCode()));
+        return text.toString();
     }
 }

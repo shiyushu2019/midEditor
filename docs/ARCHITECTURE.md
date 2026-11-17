@@ -159,7 +159,7 @@ public final class Track {
     private int volume = 100;              // 0-127 -> CC7
     private int pan = 64;                  // 0-127 -> CC10
     private final List<Note> notes;        // 按 startTick 排序维护
-    private PitchRange yRange;             // 钢琴卷帘可见音域（独立垂直滚动）
+    private PitchRange yRange;             // 钢琴卷帘可见音域（频率轴：可缩放 12-128 行 / 可滑动）
     private boolean drumKit;
 }
 
@@ -268,7 +268,7 @@ public interface DocumentEdit { String label(); void undo(); void redo(); boolea
 
 ## 9. 实现状态（v1.0，已交付）
 
-已按 S0→S6 全部实现并通过 `mvn test`（26 项）：
+已按 S0→S6 全部实现并通过 `mvn test`（32 项）：
 
 | 模块 | 实际实现 |
 | --- | --- |
@@ -287,7 +287,7 @@ public interface DocumentEdit { String label(); void undo(); void redo(); boolea
 与早期设计的差异（均为实现期决策）：
 
 1. **音色降级**：未引入程序化合成后端；无音色库时退回 JDK 默认 SoundBank 并在诊断中标注。
-2. **逐轨垂直滚动**：以「音域窗口」实现（音轨头 ▲▼、Alt+滚轮），未绘制独立滚动条。
+2. **逐轨垂直滚动**：以可缩放的「音域窗口」实现（音轨头 ▲▼＋－、Alt+滚轮滑动、Shift+滚轮/键盘标尺滚轮缩放，行数 12–128），未绘制独立滚动条。
 3. **未使用 `--add-exports`**：音色库经公共 API `MidiSystem.getSoundbank(File)` 加载，运行无需任何 JVM 参数。
 4. **播放调度时钟**：优先使用合成器微秒时钟（反射 `getMicrosecondPosition`），不可用时退回 `System.nanoTime()`。
 5. **主框架标题**：`midEditor — <文档名><*>`；窗口菜单选中项与活动文档同步。
@@ -307,3 +307,34 @@ public interface DocumentEdit { String label(); void undo(); void redo(); boolea
 
 另：Maven 安装在 `D:\Tools\apache-maven-3.10.1`，已写入用户级 `Path` / `MAVEN_HOME`；仓库内的 Maven Wrapper（`mvnw*`、`.mvn/`）与临时构建脚本已删除。
 测试增至 20 项（含默认时长、键盘标尺、试听事件投递、音域/弯音保真、同 tick 的 note-off 顺序与音频时钟可用性）。
+
+## 11. v1.2 频率轴（音域）可缩放
+
+用户反馈「频率谱不够用」：原先每轨固定 30 行（45–74 左右），跨度大的曲子会有平行线被挡在可见音域之外，且只能用 ▲▼ 一格格挪。
+本次把 Y 轴（音高 = 频率）做成可缩放、可滑动的轴：
+
+| 维度 | 实现 |
+| --- | --- |
+| 数据模型 | `PitchRange` 新增 `MIN_ROWS=12` / `MAX_ROWS=128` / `withRows()` / `fitting()`；`Track.pitchRows()` / `setPitchRows()` / `shiftPitchRange()`。行数（可见半音数）就是缩放级别，泳道像素高度固定（`Theme.LANE_HEIGHT`），所以缩放只改行高，不影响多轨排列 |
+| 几何换算 | `PianoRollView.rowTop/rowBottom` 改为 `round(行序号 × 泳道高 ÷ 行数)`，保证 12–128 行都能**整数像素铺满泳道、无缝隙无重叠**；`pitchAt()` 用整数反算，命中测试与拖拽改音高在任意缩放下都准 |
+| 鼠标滚轮（v1.3 统一） | **裸滚轮**：在卷帘 / 键盘标尺上 = 上下滚动频谱；在左侧音轨信息区 = 滚动一屏放不下的音轨。`Shift+滚轮` = 左右滚动；`Alt+滚轮` = 左右缩放（锚点 = 鼠标处 tick）；`Ctrl+滚轮` = 上下缩放（锚点 = 鼠标处音高）。缩放锚点由 `PianoRollView.wheelZoomTime/wheelZoomPitch` 保证：缩放前后鼠标下的 tick / 音高停在同一像素（`PitchRange.aligned(rows, desiredHigh)`） |
+| 菜单 / 快捷键 | 视图 → 音域（频率轴）：放大 / 缩小 / 重置为 30 个半音 / 适配本音轨平行线 / 显示全部音域（128）；`Ctrl+Alt+=` `Ctrl+Alt+-` `Ctrl+Alt+0`；右键菜单与「网格设置」面板同步提供行数微调框（可应用到全部音轨） |
+| 渲染自适应 | 平行线粗细按行高换算（始终 ≥1px，力度映射保持不变）；键盘标尺在行高 <7px 时省略八度文字，避免 128 行时文字糊成一片 |
+| 导入自适应 | `Track.autoRangeFromNotes()` 改用 `PitchRange.fitting()`：音域跨度超过 30 个半音时自动放大窗口，导入的 .mid 不再有「看不见的音」 |
+
+测试增至 32 项（新增 `PitchAxisTest` 6 项：行数双向钳位与中心保持、跨度自适应、12/30/60/128 行下的行几何与 `pitchAt` 反解、滚轮滑动/缩放、键盘标尺滚轮、音域适配与重置）。
+
+### v1.3 滚轮语义统一 + Windows 下「按过 Alt 后滚轮失效」修复
+
+滚动/缩放规则收敛成一张表（画布、键盘标尺、音轨头共用 `PianoRollView.wheel*` 方法）：
+
+| 位置 | 裸滚轮 | Shift+滚轮 | Alt+滚轮 | Ctrl+滚轮 |
+| --- | --- | --- | --- | --- |
+| 卷帘 / 键盘标尺 | 上下滚动频谱 | 左右滚动 | 左右缩放 | 上下缩放 |
+| 左侧音轨信息区 | 滚动一屏放不下的音轨 | 左右滚动 | 左右缩放 | 上下缩放 |
+
+缩放锚点：`wheelZoomTime` 以鼠标处 tick 为锚点重设 `pxPerQuarter` 并回推视口位置（`viewX' = viewX + newX - mouseX`）；`wheelZoomPitch` 由鼠标 y 反算连续音高，用 `PitchRange.aligned(target, anchorPitch + offset×target/laneHeight)` 重建窗口，缩放前后鼠标下的 tick / 音高停在同一像素。
+
+**「按过 Alt 之后滚轮完全没反应」根因**：单独按一下（或按住又松开）Alt 时，Windows 会让窗口进入系统「菜单模式」（`WM_SYSKEYUP`），此期间 OS 直接**丢弃滚轮消息**（键盘与点击仍正常），必须再按一个键或点击一次才会恢复 —— 这就是“滚轮时灵时不灵”的真因。修复：`app/AltReleaseWheelFix` 监听裸 Alt 抬起，用缓存的 `Robot` 补发一个 ESC（本应用不占用 ESC）让窗口立即退出菜单模式；仅在主窗口为活动窗口、且无弹出菜单选择时补发。实测：Alt 抬起后裸滚轮 45→44（修复前为无事件）。
+
+新增 `PitchAxisTest` 用例（统一修饰键语义、Ctrl 缩放锚点音高不变、裸滚轮滑动），测试总计 34 项。

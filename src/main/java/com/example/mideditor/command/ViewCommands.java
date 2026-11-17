@@ -91,6 +91,24 @@ final class ViewCommands {
                 CommandContext::hasDocument,
                 ctx -> ctx.hasDocument() && ctx.document().keyboardRulerVisible()));
 
+        // ---- 频率轴（音域）：滚轮 / 快捷键 / 菜单都能缩放与滑动
+        Predicate<CommandContext> hasActiveTrack = CommandContext::hasTrack;
+        registry.register(new AppCommand(AppCommandIds.VIEW_PITCH_ZOOM_IN, "音域放大", CommandScope.DOCUMENT,
+                FileCommands.key(KeyEvent.VK_EQUALS, InputEvent.CTRL_DOWN_MASK | InputEvent.ALT_DOWN_MASK),
+                ctx -> ctx.document().pitchZoomIn(), hasActiveTrack, null));
+        registry.register(new AppCommand(AppCommandIds.VIEW_PITCH_ZOOM_OUT, "音域缩小", CommandScope.DOCUMENT,
+                FileCommands.key(KeyEvent.VK_MINUS, InputEvent.CTRL_DOWN_MASK | InputEvent.ALT_DOWN_MASK),
+                ctx -> ctx.document().pitchZoomOut(), hasActiveTrack, null));
+        registry.register(new AppCommand(AppCommandIds.VIEW_PITCH_ZOOM_RESET, "音域重置", CommandScope.DOCUMENT,
+                FileCommands.key(KeyEvent.VK_0, InputEvent.CTRL_DOWN_MASK | InputEvent.ALT_DOWN_MASK),
+                ctx -> ctx.document().pitchZoomReset(), hasActiveTrack, null));
+        registry.register(new AppCommand(AppCommandIds.VIEW_PITCH_FIT, "音域适配平行线", CommandScope.DOCUMENT,
+                null,
+                ctx -> ctx.document().pitchFitToNotes(), hasActiveTrack, null));
+        registry.register(new AppCommand(AppCommandIds.VIEW_PITCH_SHOW_ALL, "显示全部音域", CommandScope.DOCUMENT,
+                null,
+                ctx -> ctx.document().pitchShowAll(), CommandContext::hasDocument, null));
+
         // ---- 窗口
         Predicate<CommandContext> hasSessions = ctx -> ctx.app().documents().sessionCount() > 0;
         registry.register(new AppCommand(AppCommandIds.WINDOW_CASCADE, "层叠", CommandScope.APPLICATION,
@@ -129,8 +147,9 @@ final class ViewCommands {
                 运行环境：Java %s
 
                 快捷键：空格 播放/暂停，Delete 删除平行线，
-                Ctrl+Z/Ctrl+Shift+Z 撤销/重做，Alt+↑↓←→ 移动平行线，
-                Ctrl+滚轮 水平缩放，Alt+滚轮 音轨音域滚动。
+                Ctrl+Z/Ctrl+Shift+Z 撤销/重做，Alt+↑↓←→ 移动平行线。
+                滚轮：频谱上下滚动（音轨头上滚轮 = 滚动放不下的音轨）；
+                Shift+滚轮 左右滚动，Alt+滚轮 左右缩放，Ctrl+滚轮 上下缩放。
                 """.formatted(app.synth().description(), System.getProperty("java.version"));
         JOptionPane.showMessageDialog(app.mainFrame(), message, "关于 midEditor",
                 JOptionPane.INFORMATION_MESSAGE);

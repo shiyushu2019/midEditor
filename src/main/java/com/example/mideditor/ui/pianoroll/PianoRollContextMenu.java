@@ -50,6 +50,8 @@ final class PianoRollContextMenu {
             velocity.add(registry.action(AppCommandIds.EDIT_VELOCITY_DOWN));
             menu.add(velocity);
 
+            menu.add(pitchAxisMenu(registry));
+
             menu.addSeparator();
             menu.add(registry.action(AppCommandIds.EDIT_CUT));
             menu.add(registry.action(AppCommandIds.EDIT_COPY));
@@ -66,8 +68,23 @@ final class PianoRollContextMenu {
             menu.addSeparator();
             menu.add(registry.action(AppCommandIds.EDIT_PASTE));
             menu.add(registry.action(AppCommandIds.EDIT_SELECT_ALL));
+            menu.addSeparator();
+            menu.add(pitchAxisMenu(registry));
         }
         menu.show(canvas, point.x, point.y);
+    }
+
+    /** 频率轴：滚轮可在键盘标尺 / 画布上缩放、滑动音域。 */
+    private static JMenu pitchAxisMenu(com.example.mideditor.command.CommandRegistry registry) {
+        JMenu menu = new JMenu("频率轴（音域）");
+        menu.setFont(Theme.BASE_FONT);
+        menu.add(registry.action(AppCommandIds.VIEW_PITCH_ZOOM_IN));
+        menu.add(registry.action(AppCommandIds.VIEW_PITCH_ZOOM_OUT));
+        menu.addSeparator();
+        menu.add(registry.action(AppCommandIds.VIEW_PITCH_FIT));
+        menu.add(registry.action(AppCommandIds.VIEW_PITCH_SHOW_ALL));
+        menu.add(registry.action(AppCommandIds.VIEW_PITCH_ZOOM_RESET));
+        return menu;
     }
 
     /** 新建平行线默认长度（与「网格设置」面板同步）。 */

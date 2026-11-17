@@ -29,6 +29,7 @@ public final class TransportBar extends JPanel {
     private final JSpinner bpmSpinner;
     private final JComboBox<GridSettings.Resolution> gridBox;
     private final JSlider zoomSlider;
+    private final JLabel pitchLabel = new JLabel("-");
     private boolean updating;
 
     public TransportBar(MidiDocumentView host) {
@@ -63,6 +64,7 @@ public final class TransportBar extends JPanel {
         bpmSpinner = new JSpinner(new SpinnerNumberModel(120, 20, 300, 1));
         bpmSpinner.setFont(Theme.BASE_FONT);
         bpmSpinner.setPreferredSize(new java.awt.Dimension(64, 24));
+        bpmSpinner.setToolTipText("文档速度（每分钟拍数），20-300 BPM");
         bpmSpinner.addChangeListener(e -> {
             if (updating) {
                 return;
@@ -75,6 +77,7 @@ public final class TransportBar extends JPanel {
         add(label("网格"));
         gridBox = new JComboBox<>(GridSettings.Resolution.values());
         gridBox.setFont(Theme.SMALL_FONT);
+        gridBox.setToolTipText("网格分辨率：网格线间距、吸附与新建平行线长度的参考单位");
         gridBox.setSelectedItem(host.grid().resolution());
         gridBox.addActionListener(e -> {
             if (updating) {
@@ -90,6 +93,7 @@ public final class TransportBar extends JPanel {
         add(label("缩放"));
         zoomSlider = new JSlider(25, 800, 100);
         zoomSlider.setPreferredSize(new java.awt.Dimension(120, 22));
+        zoomSlider.setToolTipText("水平缩放比例（快捷键 Ctrl+= / Ctrl+- / Ctrl+0）");
         zoomSlider.addChangeListener(e -> {
             if (updating) {
                 return;
@@ -98,6 +102,14 @@ public final class TransportBar extends JPanel {
             host.app().refreshCommandStates();
         });
         add(zoomSlider);
+
+        add(separator());
+        add(label("音域"));
+        pitchLabel.setFont(Theme.SMALL_FONT);
+        pitchLabel.setForeground(new java.awt.Color(0x2C3A48));
+        pitchLabel.setPreferredSize(new java.awt.Dimension(150, 22));
+        pitchLabel.setToolTipText("当前音轨可见半音数与音域范围");
+        add(pitchLabel);
 
         refresh();
     }
@@ -160,6 +172,10 @@ public final class TransportBar extends JPanel {
             bpmSpinner.setValue((int) Math.round(host.document().tempoMap().bpmAt(0)));
             gridBox.setSelectedItem(host.grid().resolution());
             zoomSlider.setValue((int) Math.round(host.pianoRoll().timeline().zoom() * 100));
+            var track = host.activeTrack();
+            pitchLabel.setText(track == null ? "-"
+                    : track.pitchRows() + " 半音 · " + track.yRange().low() + "-"
+                            + (track.yRange().high() - 1));
         } finally {
             updating = false;
         }
