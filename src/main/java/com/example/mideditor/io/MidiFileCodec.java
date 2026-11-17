@@ -229,12 +229,10 @@ public final class MidiFileCodec {
             data.program = pitch;
             data.programSeen = true;
         } else if (command == ShortMessage.CONTROL_CHANGE) {
-            if (pitch == 7) {
-                data.volume = value;
-            } else if (pitch == 10) {
-                data.pan = value;
-            } else {
-                data.rawEvents.add(new RawChannelEvent(tick, command, pitch, value));
+            switch (pitch) {
+                case 7 -> data.volume = value;
+                case 10 -> data.pan = value;
+                default -> data.rawEvents.add(new RawChannelEvent(tick, command, pitch, value));
             }
         } else if (command == ShortMessage.PITCH_BEND
                 || command == ShortMessage.CHANNEL_PRESSURE

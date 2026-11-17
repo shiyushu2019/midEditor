@@ -30,6 +30,7 @@ public final class TransportBar extends JPanel {
     private final JComboBox<GridSettings.Resolution> gridBox;
     private final JSlider zoomSlider;
     private final JLabel pitchLabel = new JLabel("-");
+    private final JLabel loopLabel = new JLabel("循环关闭");
     private boolean updating;
 
     public TransportBar(MidiDocumentView host) {
@@ -43,8 +44,16 @@ public final class TransportBar extends JPanel {
         add(playButton);
         add(actionButton(registry.action(AppCommandIds.PLAY_STOP), Icons.stop(), "停止"));
         add(actionButton(registry.action(AppCommandIds.PLAY_REWIND), Icons.rewind(), "回到开头"));
-        add(toggleButton(registry.action(AppCommandIds.PLAY_TOGGLE_LOOP), Icons.loop(), "循环播放"));
-        add(toggleButton(registry.action(AppCommandIds.PLAY_TOGGLE_METRONOME), Icons.metronome(), "节拍器"));
+        add(toggleButton(registry.action(AppCommandIds.PLAY_TOGGLE_LOOP), Icons.loop(), "循环播放（Ctrl+L）"));
+        loopLabel.setFont(Theme.SMALL_FONT);
+        loopLabel.setForeground(new java.awt.Color(0x2C3A48));
+        loopLabel.setPreferredSize(new java.awt.Dimension(140, 22));
+        loopLabel.setToolTipText("循环域：在时间标尺顶部循环条上拖动可调整（双击关闭）");
+        add(loopLabel);
+        JButton loopToSelection = textButton("循环=选区", "把循环域设为当前选中平行线的范围（Ctrl+Shift+L）");
+        loopToSelection.addActionListener(e -> host.loopToSelection());
+        add(loopToSelection);
+        add(toggleButton(registry.action(AppCommandIds.PLAY_TOGGLE_METRONOME), Icons.metronome(), "节拍器（Ctrl+M）"));
 
         JButton addTrack = textButton("＋轨", "添加音轨（Ctrl+Shift+T）");
         addTrack.addActionListener(e -> host.addTrack());
@@ -176,6 +185,9 @@ public final class TransportBar extends JPanel {
             pitchLabel.setText(track == null ? "-"
                     : track.pitchRows() + " 半音 · " + track.yRange().low() + "-"
                             + (track.yRange().high() - 1));
+            loopLabel.setText(host.loopEnabled()
+                    ? "循环 " + host.loopStart() + "-" + host.loopEnd()
+                    : "循环关闭");
         } finally {
             updating = false;
         }

@@ -82,10 +82,12 @@ public final class MidiDocumentView extends DocumentView {
         return pianoRoll;
     }
 
+    @Override
     public Track activeTrack() {
         return activeTrack;
     }
 
+    @Override
     public void setActiveTrack(Track track) {
         if (track != null && !document().tracks().contains(track)) {
             return;
@@ -114,6 +116,16 @@ public final class MidiDocumentView extends DocumentView {
 
     public void toggleKeyboardRuler() {
         pianoRoll.toggleKeyboardRuler();
+        app().refreshApplicationState();
+    }
+
+    /** 是否高亮 Do（C）行。 */
+    public boolean cHighlightVisible() {
+        return pianoRoll.cHighlightVisible();
+    }
+
+    public void toggleCHighlight() {
+        pianoRoll.toggleCHighlight();
         app().refreshApplicationState();
     }
 
@@ -287,14 +299,39 @@ public final class MidiDocumentView extends DocumentView {
     }
 
     public void toggleLoop() {
-        loopOn = !loopOn;
-        updateLoopFromSelectionOrDocument();
-        PlaybackEngine engine = app().playback();
-        if (engine.owner() == this) {
-            engine.setLoopEnabled(loopOn, loopRange());
+        setLoopEnabled(!loopOn);
+    }
+
+    /** 开关循环播放；开启时保留已设置的循环域。 */
+    public void setLoopEnabled(boolean enabled) {
+        loopOn = enabled;
+        if (enabled) {
+            ensureLoopRange();
         }
+        syncLoopToEngine();
         refresh();
         app().refreshApplicationState();
+    }
+
+    /** 显式设置循环域（自动开启循环，起止自动交换、最短 1 tick）。 */
+    public void setLoopRange(long startTick, long endTick) {
+        long low = Math.max(0, Math.min(startTick, endTick));
+        long high = Math.max(low + 1, Math.max(startTick, endTick));
+        loopStart = low;
+        loopEnd = high;
+        loopOn = true;
+        syncLoopToEngine();
+        refresh();
+        app().refreshApplicationState();
+    }
+
+    /** 循环域设为当前选区；无选区时取整篇文档。 */
+    public void loopToSelection() {
+        if (!selection().isEmpty()) {
+            setLoopRange(selection().minStartTick(document()), selection().maxEndTick(document()));
+        } else {
+            setLoopRange(0, Math.max(document().ppq() * 16L, document().endTick()));
+        }
     }
 
     public void toggleMetronome() {
@@ -310,15 +347,20 @@ public final class MidiDocumentView extends DocumentView {
     }
 
     private PlaybackEngine.LoopRange loopRange() {
-        updateLoopFromSelectionOrDocument();
+        ensureLoopRange();
         return new PlaybackEngine.LoopRange(loopStart, loopEnd);
     }
 
-    private void updateLoopFromSelectionOrDocument() {
-        if (!selection().isEmpty()) {
-            loopStart = selection().minStartTick(document());
-            loopEnd = Math.max(loopStart + 1, selection().maxEndTick(document()));
-        } else {
+    private void syncLoopToEngine() {
+        PlaybackEngine engine = app().playback();
+        if (engine.owner() == this) {
+            engine.setLoopEnabled(loopOn, loopRange());
+        }
+    }
+
+    /** 循环域未设置（或起止反了）时回退到整篇文档，避免跑出一个空区间。 */
+    private void ensureLoopRange() {
+        if (loopEnd <= loopStart) {
             loopStart = 0;
             loopEnd = Math.max(document().ppq() * 16L, document().endTick());
         }

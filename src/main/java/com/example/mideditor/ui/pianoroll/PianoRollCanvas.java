@@ -12,6 +12,8 @@ import java.awt.event.MouseWheelEvent;
 import javax.swing.JComponent;
 import javax.swing.SwingUtilities;
 
+import com.example.mideditor.command.AppCommandIds;
+import com.example.mideditor.command.CommandRegistry;
 import com.example.mideditor.document.MidiDocument;
 import com.example.mideditor.document.MidiDocumentView;
 import com.example.mideditor.domain.Note;
@@ -46,6 +48,28 @@ public final class PianoRollCanvas extends JComponent {
         addMouseListener(handler);
         addMouseMotionListener(handler);
         addMouseWheelListener(handler);
+        installArrowKeys();
+    }
+
+    /** 方向键直接改音高 / 位置（画布有焦点时优先于滚动面板的同键绑定）。 */
+    private void installArrowKeys() {
+        CommandRegistry registry = view.host().app().registry();
+        registry.bindLocal(this, javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_UP, 0),
+                AppCommandIds.NOTE_MOVE_UP);
+        registry.bindLocal(this, javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_DOWN, 0),
+                AppCommandIds.NOTE_MOVE_DOWN);
+        registry.bindLocal(this, javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_LEFT, 0),
+                AppCommandIds.NOTE_MOVE_LEFT);
+        registry.bindLocal(this, javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_RIGHT, 0),
+                AppCommandIds.NOTE_MOVE_RIGHT);
+        registry.bindLocal(this,
+                javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_RIGHT,
+                        java.awt.event.InputEvent.SHIFT_DOWN_MASK),
+                AppCommandIds.NOTE_LENGTHEN);
+        registry.bindLocal(this,
+                javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_LEFT,
+                        java.awt.event.InputEvent.SHIFT_DOWN_MASK),
+                AppCommandIds.NOTE_SHORTEN);
     }
 
     public PianoRollView view() {

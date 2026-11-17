@@ -47,6 +47,16 @@ final class PlaybackCommands {
         loop.putIcon(Icons.LOOP);
         registry.register(loop);
 
+        registry.register(new AppCommand(AppCommandIds.PLAY_LOOP_TO_SELECTION, "循环域＝选区",
+                CommandScope.DOCUMENT,
+                FileCommands.key(KeyEvent.VK_L, InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK),
+                ctx -> ctx.document().loopToSelection(), CommandContext::hasDocument, null));
+
+        registry.register(new AppCommand(AppCommandIds.PLAY_LOOP_CLEAR, "清除循环域",
+                CommandScope.DOCUMENT, null,
+                ctx -> ctx.document().setLoopEnabled(false), CommandContext::hasDocument,
+                ctx -> ctx.hasDocument() && ctx.document().loopEnabled()));
+
         AppCommand metronome = new AppCommand(AppCommandIds.PLAY_TOGGLE_METRONOME, "节拍器", CommandScope.DOCUMENT,
                 FileCommands.key(KeyEvent.VK_M, InputEvent.CTRL_DOWN_MASK),
                 ctx -> ctx.document().toggleMetronome(), CommandContext::hasDocument,

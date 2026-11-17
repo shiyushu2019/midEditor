@@ -54,8 +54,7 @@ public final class MainFrame extends JFrame {
         add(statusBar, BorderLayout.SOUTH);
 
         app.setDock(dock);
-        app.setMainFrame(this);
-        AltReleaseWheelFix.install(this);
+        registerSelf();
         installFileDrop();
         ToolPanels.install(app, dock);
 
@@ -75,6 +74,12 @@ public final class MainFrame extends JFrame {
 
     public MdiWorkspace workspace() {
         return workspace;
+    }
+
+    /** 把自己登记到 AppContext，并装上 Alt/滚轮兼容修复。 */
+    private void registerSelf() {
+        app.setMainFrame(this);
+        AltReleaseWheelFix.install(this);
     }
 
     /** 允许把 .mid 文件直接拖进窗口打开（窗口任意位置都可放下）。 */
@@ -158,8 +163,8 @@ public final class MainFrame extends JFrame {
                     try {
                         session.frame().setIcon(false);
                         session.frame().setSelected(true);
-                    } catch (Exception ignored) {
-                        // 忽略
+                    } catch (java.beans.PropertyVetoException ignored) {
+                        // 子窗口状态被否决时忽略
                     }
                 }
             });

@@ -48,7 +48,7 @@ final class FileDropHandler extends TransferHandler {
                     }
                 }
             }
-        } catch (Exception e) {
+        } catch (java.io.IOException | java.awt.datatransfer.UnsupportedFlavorException e) {
             Log.error("拖拽内容解析失败：" + e);
             return false;
         }

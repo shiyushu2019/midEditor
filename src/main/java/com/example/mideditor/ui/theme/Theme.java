@@ -27,6 +27,10 @@ public final class Theme {
     public static final Color ROW_WHITE = new Color(0x2A323C);
     public static final Color ROW_BLACK = new Color(0x191E25);
     public static final Color ROW_OCTAVE_LINE = new Color(0x39434F);
+    /** C（Do）行：半透明黄色叠加，不改底色也不画边框（避免与音轨彩色平行线抢眼）。 */
+    public static final Color C_TINT = new Color(0xFF, 0xD2, 0x3F, 0x3A);
+    public static final Color C_TINT_KEY = new Color(0xFF, 0xD2, 0x3F, 0x5C);
+    public static final Color KEY_C_TEXT = new Color(0x6B4E00);
     public static final Color BAR_LINE = new Color(0x6C7C8C);
     public static final Color BEAT_LINE = new Color(0x46525F);
     public static final Color GRID_LINE = new Color(0x2E3742);

@@ -46,7 +46,19 @@ public final class CommandRegistry {
         }
     }
 
-    void setRouter(CommandRouter router) {
+    /**
+     * 把命令接到具体组件的 WHEN_FOCUSED 输入表（例如卷帘画布的箭头键），
+     * 这样能优先于 JScrollPane 等祖先组件的同键绑定；动作仍复用同一套 ActionMap。
+     */
+    public void bindLocal(JComponent component, KeyStroke stroke, String commandId) {
+        if (component == null || stroke == null || !commands.containsKey(commandId)) {
+            return;
+        }
+        component.getInputMap(JComponent.WHEN_FOCUSED).put(stroke, commandId);
+        component.getActionMap().setParent(actionMap);
+    }
+
+    public void setRouter(CommandRouter router) {
         this.router = router;
     }
 

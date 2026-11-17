@@ -18,8 +18,9 @@ public final class MidiEditorApp {
         SwingUtilities.invokeLater(() -> {
             try {
                 UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-            } catch (Exception ignored) {
-                // 使用默认 Look and Feel
+            } catch (ClassNotFoundException | InstantiationException
+                    | IllegalAccessException | javax.swing.UnsupportedLookAndFeelException ignored) {
+                // 系统外观不可用时保持默认 Look and Feel
             }
             AppContext app = new AppContext();
             MainFrame frame = new MainFrame(app);

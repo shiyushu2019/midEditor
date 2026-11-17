@@ -175,6 +175,7 @@ public final class MenuBarBuilder {
         checkItem(menu, AppCommandIds.VIEW_TOGGLE_GRID, "显示网格");
         checkItem(menu, AppCommandIds.VIEW_FOLLOW_PLAYHEAD, "播放头跟随");
         checkItem(menu, AppCommandIds.VIEW_KEYBOARD_RULER, "键盘标尺(K)");
+        checkItem(menu, AppCommandIds.VIEW_C_HIGHLIGHT, "Do（C）高亮");
 
         JMenu pitch = new JMenu("音域（频率轴）");
         pitch.setFont(Theme.BASE_FONT);
@@ -196,6 +197,8 @@ public final class MenuBarBuilder {
         menu.add(arrange);
 
         item(menu, AppCommandIds.PLAY_TOGGLE_LOOP, "循环播放");
+        item(menu, AppCommandIds.PLAY_LOOP_TO_SELECTION, "循环域＝选区");
+        item(menu, AppCommandIds.PLAY_LOOP_CLEAR, "清除循环域");
         item(menu, AppCommandIds.PLAY_TOGGLE_METRONOME, "节拍器");
         return menu;
     }

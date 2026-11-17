@@ -8,6 +8,7 @@ import java.awt.event.MouseWheelEvent;
 import javax.swing.SwingUtilities;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import org.junit.jupiter.api.Test;
@@ -171,6 +172,50 @@ class PitchAxisTest {
                     wheelEventAt(canvas, InputEvent.CTRL_DOWN_MASK, 1, probeY)));
             assertEquals(pitchMid, view.pianoRoll().pitchAt(track, 0, probeY),
                     "缩小后鼠标下的音高同样应保持不动");
+        } finally {
+            cleanup(app, holder[0]);
+        }
+    }
+
+    @Test
+    void pitchRangeCoversEveryMidiPitch() {
+        PitchRange full = PitchRange.full();
+        assertEquals(0, full.low());
+        assertEquals(128, full.high());
+        assertEquals(128, full.rows(), "MIDI 共 128 个半音（0-127）");
+        assertTrue(full.contains(0), "最低音 C-1（MIDI 0）应可见");
+        assertTrue(full.contains(127), "最高音 G9（MIDI 127）应可见");
+        assertTrue(full.contains(21), "钢琴最低键 A0（MIDI 21）应可见");
+        assertTrue(full.contains(108), "钢琴最高键 C8（MIDI 108）应可见");
+
+        PitchRange aligned = PitchRange.aligned(128, 127);
+        assertEquals(0, aligned.low(), "行数拉满时应从 MIDI 0 开始");
+        assertEquals(128, aligned.high());
+
+        // 领域模型也不截断：0-127 全部合法
+        assertEquals(0, new com.example.mideditor.domain.Note(0, 0, 10, 100).pitch());
+        assertEquals(127, new com.example.mideditor.domain.Note(127, 0, 10, 100).pitch());
+        assertEquals(0, new com.example.mideditor.domain.Note(-5, 0, 10, 100).pitch(), "超范围向下夹紧");
+        assertEquals(127, new com.example.mideditor.domain.Note(200, 0, 10, 100).pitch(), "超范围向上夹紧");
+    }
+
+    @Test
+    void cHighlightCanBeToggled() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "需要图形环境");
+        AppContext app = new AppContext();
+        MainFrame[] holder = new MainFrame[1];
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                holder[0] = new MainFrame(app);
+                holder[0].setVisible(false);
+                app.documents().newDocument();
+            });
+            MidiDocumentView view = app.documents().activeView();
+            assertTrue(view.cHighlightVisible(), "默认应高亮 Do（C）行");
+            SwingUtilities.invokeAndWait(view::toggleCHighlight);
+            assertFalse(view.cHighlightVisible());
+            SwingUtilities.invokeAndWait(view::toggleCHighlight);
+            assertTrue(view.cHighlightVisible());
         } finally {
             cleanup(app, holder[0]);
         }

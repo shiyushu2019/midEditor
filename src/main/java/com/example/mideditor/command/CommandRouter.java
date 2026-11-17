@@ -18,7 +18,6 @@ public final class CommandRouter {
 
     public CommandRouter(CommandRegistry registry) {
         this.registry = registry;
-        registry.setRouter(this);
     }
 
     public void setContextSupplier(Supplier<CommandContext> supplier) {

@@ -60,16 +60,24 @@ final class PianoRollPainter {
         int laneTop = view.laneTop(laneIndex);
         int laneHeight = view.laneHeight();
         PitchRange range = track.yRange();
+        boolean cHighlight = view.cHighlightVisible();
 
         for (int pitch = range.high() - 1; pitch >= range.low(); pitch--) {
             int y = view.rowTop(track, laneIndex, pitch);
             int bottom = view.rowBottom(track, laneIndex, pitch);
             int rowHeight = Math.max(1, bottom - y);
+            boolean isC = pitch % 12 == 0;
             g.setColor(isBlackKey(pitch) ? Theme.ROW_BLACK : Theme.ROW_WHITE);
             g.fillRect(clip.x, y, clip.width, rowHeight);
-            if (pitch % 12 == 0) {
-                g.setColor(Theme.ROW_OCTAVE_LINE);
-                g.drawLine(clip.x, bottom - 1, clip.x + clip.width, bottom - 1);
+            if (isC) {
+                if (cHighlight) {
+                    // 只在行内部涂一层半透明黄色（不加边框、不改底色）
+                    g.setColor(Theme.C_TINT);
+                    g.fillRect(clip.x, y, clip.width, rowHeight);
+                } else {
+                    g.setColor(Theme.ROW_OCTAVE_LINE);
+                    g.drawLine(clip.x, bottom - 1, clip.x + clip.width, bottom - 1);
+                }
             }
         }
 

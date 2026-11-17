@@ -28,6 +28,7 @@ public final class PianoRollView extends JPanel {
     private final JPanel rowHeader = new JPanel(new BorderLayout());
     private final JScrollPane scroll;
     private boolean keyboardRulerVisible = true;
+    private boolean cHighlightVisible = true;
 
     public PianoRollView(MidiDocumentView host) {
         super(new BorderLayout());
@@ -78,6 +79,11 @@ public final class PianoRollView extends JPanel {
     /** 左侧频率轴（钢琴键盘标尺），滚轮可滑动 / 缩放音域。 */
     public PianoKeysColumn keysColumn() {
         return keysColumn;
+    }
+
+    /** 顶部时间标尺（含循环条）。 */
+    public TimeRuler ruler() {
+        return ruler;
     }
 
     public JScrollPane scrollPane() {
@@ -384,6 +390,26 @@ public final class PianoRollView extends JPanel {
     public boolean toggleKeyboardRuler() {
         setKeyboardRulerVisible(!keyboardRulerVisible);
         return keyboardRulerVisible;
+    }
+
+    /** 是否高亮 Do（C）行：每个八度的起点在频谱与键盘标尺上做标记。 */
+    public boolean cHighlightVisible() {
+        return cHighlightVisible;
+    }
+
+    public void setCHighlightVisible(boolean visible) {
+        if (cHighlightVisible == visible) {
+            return;
+        }
+        cHighlightVisible = visible;
+        keysColumn.repaint();
+        canvas.repaint();
+    }
+
+    /** 切换 Do（C）高亮并返回新状态。 */
+    public boolean toggleCHighlight() {
+        setCHighlightVisible(!cHighlightVisible);
+        return cHighlightVisible;
     }
 
     /** 将指定泳道滚动到可见区域（添加 / 切换音轨时使用，优先把该泳道顶部对齐）。 */

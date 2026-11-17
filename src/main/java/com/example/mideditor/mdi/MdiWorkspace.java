@@ -37,8 +37,8 @@ public final class MdiWorkspace extends JDesktopPane {
         frame.setVisible(true);
         try {
             frame.setSelected(true);
-        } catch (Exception ignored) {
-            // 忽略
+        } catch (java.beans.PropertyVetoException ignored) {
+            // 子窗口选择被否决时忽略
         }
         // 文档窗口默认在 MDI 客户区内最大化（与旧版 Word/VS 的文档窗口行为一致）
         maximizeFrame(frame);
@@ -100,24 +100,24 @@ public final class MdiWorkspace extends JDesktopPane {
     private static void safeIcon(MdiChildFrame frame, boolean icon) {
         try {
             frame.setIcon(icon);
-        } catch (Exception ignored) {
-            // 忽略
+        } catch (java.beans.PropertyVetoException ignored) {
+            // 图标化被否决时忽略
         }
     }
 
     private static void safeMaximum(MdiChildFrame frame, boolean maximum) {
         try {
             frame.setMaximum(maximum);
-        } catch (Exception ignored) {
-            // 忽略
+        } catch (java.beans.PropertyVetoException ignored) {
+            // 最大化被否决时忽略
         }
     }
 
     private static void safeSelect(MdiChildFrame frame) {
         try {
             frame.setSelected(true);
-        } catch (Exception ignored) {
-            // 忽略
+        } catch (java.beans.PropertyVetoException ignored) {
+            // 选中被否决时忽略
         }
     }
 

@@ -324,6 +324,25 @@ public interface DocumentEdit { String label(); void undo(); void redo(); boolea
 
 测试增至 32 项（新增 `PitchAxisTest` 6 项：行数双向钳位与中心保持、跨度自适应、12/30/60/128 行下的行几何与 `pitchAt` 反解、滚轮滑动/缩放、键盘标尺滚轮、音域适配与重置）。
 
+### v1.4 停止/暂停后“余音绕梁”
+
+根因有两层：
+1. **调度线程与停止竞争**：scheduler 不受 `lock` 保护，停止瞬间可能刚好又投递出一条 note-on，而 `state != PLAYING` 后它的 note-off 永远不会再发 → 卡音。
+2. **lookahead 已排队的事件**：合成器队列里最多还有 260ms 的未来 note-on，`CC123/CC120` 只能作用于已开始的音，对这些“还没响”的无能为力；而且延音踏板（CC64）踩下时 All Notes Off 会被留住变成余音。
+
+修复：
+- `PlaybackEngine.stop()/pause()` 先 `state = 非播放` ↓ interrupt 调度线程 ↓ **join(100ms)**，确保不再有新事件插进来。
+- `PlaybackEngine` 用 `pendingNoteOns` 记录“已交给合成器但时间戳还在未来”的 note-on；`panic()` 先对这些事件按同一时间点补发 note-off（微秒级 +1 避免顺序问题），再调 `allNotesOff()`。
+- `SynthService.allNotesOff()` 改为每通道依次发 **CC64=0（松踏板）→ CC123（All Notes Off）→ CC120（All Sound Off）**，并清空活动音符集合；新增 `activeNoteCount()` / `noteOffsSent()` 便于测试与诊断。
+- `seek()` / `updatePlan()` 的静音也统一走 `panic()`。
+
+新增 `PlaybackEngineTest.stopSilencesSoundingNotes`（长音 + 已排队未响的音，停止后 `activeNoteCount()==0` 且确实补发了 note-off；暂停同样验证），测试总计 41 项。
+
+### v1.5 音域完整性与 Do（C）高亮
+
+- **音域是完整的**：`Note.pitch` 夹紧在 `0..127`，`PitchRange` 上限 128 行，即 MIDI 全部 128 个半音（C-1 到 G9）都能建模、编辑、播放与显示；钢琴 A0(21)–C8(108)、鼓组 35–81 都包含在内。之前“看不到”只是默认音域窗口只有 30 个半音，拉满 128 行（Ctrl+Alt+0 后再缩，或「显示全部音域」）即可全见。新增 `PitchAxisTest.pitchRangeCoversEveryMidiPitch` 固定这个约束。
+- **Do（C）高亮**：不再用色块/描边，而是在 `pitch % 12 == 0` 的行**内部叠加一层半透明黄色**（`Theme.C_TINT`，alpha 0x3A），键盘标尺对应键叠 `C_TINT_KEY`（alpha 0x5C）+ 深琥珀色八度标注；既不抢音轨平行线的颜色，也不在频谱里多出一堆框线。可用 视图 → Do（C）高亮 / Ctrl+Shift+K 或网格设置面板开关（默认开）。
+
 ### v1.3 滚轮语义统一 + Windows 下「按过 Alt 后滚轮失效」修复
 
 滚动/缩放规则收敛成一张表（画布、键盘标尺、音轨头共用 `PianoRollView.wheel*` 方法）：

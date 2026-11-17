@@ -110,21 +110,41 @@ final class EditCommands {
                 CommandContext::hasSelection, null));
 
         registry.register(new AppCommand(AppCommandIds.NOTE_MOVE_UP, "上移半音", CommandScope.SELECTION,
-                FileCommands.key(KeyEvent.VK_UP, InputEvent.ALT_DOWN_MASK),
-                ctx -> ctx.document().moveSelection(0, 1), CommandContext::hasSelection, null));
+                FileCommands.key(KeyEvent.VK_UP, 0),
+                ctx -> {
+                    if (TextFocusGuard.isTextEditing()) {
+                        return;
+                    }
+                    ctx.document().moveSelection(0, 1);
+                }, CommandContext::hasSelection, null));
 
         registry.register(new AppCommand(AppCommandIds.NOTE_MOVE_DOWN, "下移半音", CommandScope.SELECTION,
-                FileCommands.key(KeyEvent.VK_DOWN, InputEvent.ALT_DOWN_MASK),
-                ctx -> ctx.document().moveSelection(0, -1), CommandContext::hasSelection, null));
+                FileCommands.key(KeyEvent.VK_DOWN, 0),
+                ctx -> {
+                    if (TextFocusGuard.isTextEditing()) {
+                        return;
+                    }
+                    ctx.document().moveSelection(0, -1);
+                }, CommandContext::hasSelection, null));
 
         registry.register(new AppCommand(AppCommandIds.NOTE_MOVE_LEFT, "左移网格", CommandScope.SELECTION,
-                FileCommands.key(KeyEvent.VK_LEFT, InputEvent.ALT_DOWN_MASK),
-                ctx -> ctx.document().moveSelection(-gridStep(ctx.document()), 0),
+                FileCommands.key(KeyEvent.VK_LEFT, 0),
+                ctx -> {
+                    if (TextFocusGuard.isTextEditing()) {
+                        return;
+                    }
+                    ctx.document().moveSelection(-gridStep(ctx.document()), 0);
+                },
                 CommandContext::hasSelection, null));
 
         registry.register(new AppCommand(AppCommandIds.NOTE_MOVE_RIGHT, "右移网格", CommandScope.SELECTION,
-                FileCommands.key(KeyEvent.VK_RIGHT, InputEvent.ALT_DOWN_MASK),
-                ctx -> ctx.document().moveSelection(gridStep(ctx.document()), 0),
+                FileCommands.key(KeyEvent.VK_RIGHT, 0),
+                ctx -> {
+                    if (TextFocusGuard.isTextEditing()) {
+                        return;
+                    }
+                    ctx.document().moveSelection(gridStep(ctx.document()), 0);
+                },
                 CommandContext::hasSelection, null));
 
         registry.register(new AppCommand(AppCommandIds.NOTE_LENGTHEN, "拉长平行线", CommandScope.SELECTION,
@@ -136,6 +156,16 @@ final class EditCommands {
                 FileCommands.key(KeyEvent.VK_LEFT, InputEvent.ALT_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK),
                 ctx -> ctx.document().resizeSelection(-gridStep(ctx.document())),
                 CommandContext::hasSelection, null));
+
+        // 备用键位：保留旧的 Alt+方向键习惯，并补 Shift+左右键调长度
+        registry.bindAlias(AppCommandIds.NOTE_MOVE_UP, FileCommands.key(KeyEvent.VK_UP, InputEvent.ALT_DOWN_MASK));
+        registry.bindAlias(AppCommandIds.NOTE_MOVE_DOWN, FileCommands.key(KeyEvent.VK_DOWN, InputEvent.ALT_DOWN_MASK));
+        registry.bindAlias(AppCommandIds.NOTE_MOVE_LEFT, FileCommands.key(KeyEvent.VK_LEFT, InputEvent.ALT_DOWN_MASK));
+        registry.bindAlias(AppCommandIds.NOTE_MOVE_RIGHT,
+                FileCommands.key(KeyEvent.VK_RIGHT, InputEvent.ALT_DOWN_MASK));
+        registry.bindAlias(AppCommandIds.NOTE_LENGTHEN,
+                FileCommands.key(KeyEvent.VK_RIGHT, InputEvent.SHIFT_DOWN_MASK));
+        registry.bindAlias(AppCommandIds.NOTE_SHORTEN, FileCommands.key(KeyEvent.VK_LEFT, InputEvent.SHIFT_DOWN_MASK));
 
         registry.register(new AppCommand(AppCommandIds.REST_INSERT, "插入休止", CommandScope.TRACK,
                 null,

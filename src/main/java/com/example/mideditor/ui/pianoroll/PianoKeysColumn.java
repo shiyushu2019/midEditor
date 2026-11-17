@@ -72,6 +72,7 @@ public final class PianoKeysColumn extends JComponent {
                 int laneTop = view.laneTop(laneIndex);
                 PitchRange range = track.yRange();
                 boolean active = track == activeTrack;
+                boolean cHighlight = view.cHighlightVisible();
                 int rowHeight = view.rowHeight(track);
 
                 for (int pitch = range.high() - 1; pitch >= range.low(); pitch--) {
@@ -79,11 +80,18 @@ public final class PianoKeysColumn extends JComponent {
                     int bottom = view.rowBottom(track, laneIndex, pitch);
                     int height = Math.max(1, bottom - y);
                     boolean black = PianoRollPainter.isBlackKey(pitch);
+                    boolean isC = pitch % 12 == 0;
                     g2.setColor(black ? Theme.KEY_BLACK : Theme.KEY_WHITE);
                     g2.fillRect(0, y, width, height);
-                    if (pitch % 12 == 0) {
-                        g2.setColor(black ? new Color(0x8A939F) : new Color(0x5C6875));
-                        g2.drawLine(0, bottom - 1, width, bottom - 1);
+                    if (isC) {
+                        if (cHighlight) {
+                            // 键盘上也只在键内部涂半透明黄色
+                            g2.setColor(Theme.C_TINT_KEY);
+                            g2.fillRect(0, y, width, height);
+                        } else {
+                            g2.setColor(black ? new Color(0x8A939F) : new Color(0x5C6875));
+                            g2.drawLine(0, bottom - 1, width, bottom - 1);
+                        }
                     }
                 }
 
@@ -97,7 +105,8 @@ public final class PianoKeysColumn extends JComponent {
                         }
                         int y = view.rowTop(track, laneIndex, pitch);
                         String label = "C" + (pitch / 12 - 1);
-                        g2.setColor(active ? new Color(0x1B3B6F) : new Color(0x3A4552));
+                        g2.setColor(cHighlight ? Theme.KEY_C_TEXT
+                                : (active ? new Color(0x1B3B6F) : new Color(0x3A4552)));
                         g2.drawString(label, width - 6 - metrics.stringWidth(label),
                                 y + Math.min(rowHeight - 1, metrics.getAscent() + 1));
                     }

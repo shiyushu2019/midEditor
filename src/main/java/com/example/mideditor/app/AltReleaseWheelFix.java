@@ -70,7 +70,7 @@ final class AltReleaseWheelFix {
             }
             sender.keyPress(KeyEvent.VK_ESCAPE);
             sender.keyRelease(KeyEvent.VK_ESCAPE);
-        } catch (Exception e) {
+        } catch (InterruptedException | java.awt.AWTException e) {
             Log.error("Alt 抬起后的滚轮兼容修复失败：" + e);
         }
     }

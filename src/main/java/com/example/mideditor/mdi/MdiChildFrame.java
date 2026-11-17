@@ -18,12 +18,10 @@ import com.example.mideditor.document.MidiDocumentView;
 public final class MdiChildFrame extends JInternalFrame {
 
     private final DocumentSession session;
-    private final AppContext app;
 
     public MdiChildFrame(DocumentSession session, AppContext app) {
         super(session.title(), true, true, true, true);
         this.session = session;
-        this.app = app;
         setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
         setLayout(new BorderLayout());
         setMinimumSize(new Dimension(480, 320));

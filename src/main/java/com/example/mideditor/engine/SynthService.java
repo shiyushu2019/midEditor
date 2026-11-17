@@ -28,6 +28,9 @@ public final class SynthService implements AutoCloseable {
     private String description = "未初始化";
     private boolean available;
     private final java.util.concurrent.atomic.AtomicLong noteEventsSent = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong noteOffsSent = new java.util.concurrent.atomic.AtomicLong();
+    /** 正在发声的音符（channel<<8|pitch），All Notes Off 后清空。 */
+    private final java.util.Set<Integer> activeNotes = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private volatile long lastTimestamp = -1;
 
     public synchronized void open() {
@@ -60,7 +63,7 @@ public final class SynthService implements AutoCloseable {
             description = "Gervill · " + (bank == null ? "默认音色库" : bank.getName());
             available = true;
             resetChannels();
-        } catch (Throwable t) {
+        } catch (Exception | LinkageError t) {
             available = false;
             description = "音频后端不可用：" + t.getMessage();
             synth = null;
@@ -81,7 +84,7 @@ public final class SynthService implements AutoCloseable {
                     String n = p.getFileName().toString().toLowerCase();
                     return n.endsWith(".sf2") || n.endsWith(".dls");
                 }).sorted().forEach(candidates::add);
-            } catch (Exception ignored) {
+            } catch (java.io.IOException ignored) {
                 // 目录不可读则忽略
             }
         }
@@ -96,13 +99,13 @@ public final class SynthService implements AutoCloseable {
                 if (bank != null) {
                     return bank;
                 }
-            } catch (Exception ignored) {
+            } catch (java.io.IOException | javax.sound.midi.InvalidMidiDataException ignored) {
                 // 尝试下一个候选
             }
         }
         try {
             return synth.getDefaultSoundbank();
-        } catch (Throwable t) {
+        } catch (Exception | LinkageError t) {
             return null;
         }
     }
@@ -114,8 +117,8 @@ public final class SynthService implements AutoCloseable {
                 send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 10, 64));
                 send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 123, 0));
             }
-        } catch (Exception ignored) {
-            // 忽略
+        } catch (javax.sound.midi.InvalidMidiDataException | RuntimeException ignored) {
+            // 通道重置失败不影响主流程
         }
     }
 
@@ -150,8 +153,8 @@ public final class SynthService implements AutoCloseable {
             send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 11, 127));
             send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 120, 0));
             send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 123, 0));
-        } catch (Exception ignored) {
-            // 忽略
+        } catch (javax.sound.midi.InvalidMidiDataException | RuntimeException ignored) {
+            // 单通道重置失败不影响其它通道
         }
     }
 
@@ -171,15 +174,31 @@ public final class SynthService implements AutoCloseable {
         if (receiver == null) {
             return;
         }
-        if (message.getCommand() == ShortMessage.NOTE_ON && message.getData2() > 0) {
+        boolean noteOn = message.getCommand() == ShortMessage.NOTE_ON && message.getData2() > 0;
+        boolean noteOff = message.getCommand() == ShortMessage.NOTE_OFF
+                || (message.getCommand() == ShortMessage.NOTE_ON && message.getData2() == 0);
+        if (noteOn) {
             noteEventsSent.incrementAndGet();
+            activeNotes.add(noteKey(message.getChannel(), message.getData1()));
+        } else if (noteOff) {
+            noteOffsSent.incrementAndGet();
+            activeNotes.remove(noteKey(message.getChannel(), message.getData1()));
         }
         lastTimestamp = timestampMicros;
         receiver.send(message, timestampMicros);
     }
 
+    private static Integer noteKey(int channel, int pitch) {
+        return (channel << 8) | (pitch & 0xFF);
+    }
+
     public long noteEventsSent() {
         return noteEventsSent.get();
+    }
+
+    /** 已发出的 note-off 数量（用于验证停止/暂停时是否补发了消音事件）。 */
+    public long noteOffsSent() {
+        return noteOffsSent.get();
     }
 
     public long lastTimestamp() {
@@ -193,8 +212,11 @@ public final class SynthService implements AutoCloseable {
         }
         try {
             Object value = microsMethod.invoke(synth);
-            return value instanceof Long l ? l : -1;
-        } catch (Exception e) {
+            if (value instanceof Long l) {
+                return l;
+            }
+            return -1;
+        } catch (ReflectiveOperationException | RuntimeException e) {
             // 模块未导出时会抛 IllegalAccessException：永久降级，避免反复反射
             microsMethod = null;
             return -1;
@@ -209,12 +231,22 @@ public final class SynthService implements AutoCloseable {
     public void allNotesOff() {
         try {
             for (int ch = 0; ch < 16; ch++) {
+                // 先松延音踏板：踏板踩下时 All Notes Off 会被“留住”变成余音
+                send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 64, 0));
                 send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 123, 0));
+                // CC120 All Sound Off：直接掐断波的释放段，避免“余音绕梁”
                 send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 120, 0));
             }
-        } catch (Exception ignored) {
-            // 忽略
+        } catch (javax.sound.midi.InvalidMidiDataException | RuntimeException ignored) {
+            // 全音符关闭失败不影响主流程
+        } finally {
+            activeNotes.clear();
         }
+    }
+
+    /** 仍在发声（已发 note-on 且未收到 note-off）的音符数，主要用于测试与诊断。 */
+    public int activeNoteCount() {
+        return activeNotes.size();
     }
 
     /** 试听单个音符（单击平行线时使用）：立即发声，到时自动 note-off。 */
@@ -234,14 +266,14 @@ public final class SynthService implements AutoCloseable {
             javax.swing.Timer timer = new javax.swing.Timer((int) Math.max(60, millis), e -> {
                 try {
                     send(new ShortMessage(ShortMessage.NOTE_OFF, ch, Math.max(0, Math.min(127, pitch)), 0));
-                } catch (Exception ignored) {
-                    // 忽略
+                } catch (javax.sound.midi.InvalidMidiDataException | RuntimeException ignored) {
+                    // 自动 note-off 失败忽略
                 }
             });
             timer.setRepeats(false);
             timer.start();
-        } catch (Exception ignored) {
-            // 忽略
+        } catch (javax.sound.midi.InvalidMidiDataException | RuntimeException ignored) {
+            // 试听失败不影响编辑
         }
     }
 
@@ -259,11 +291,10 @@ public final class SynthService implements AutoCloseable {
             try {
                 allNotesOff();
                 synth.close();
-            } catch (Exception ignored) {
-                // 忽略
+            } finally {
+                synth = null;
+                receiver = null;
             }
-            synth = null;
-            receiver = null;
         }
         available = false;
     }

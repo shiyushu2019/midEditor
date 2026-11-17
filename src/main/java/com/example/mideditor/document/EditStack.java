@@ -13,7 +13,7 @@ public final class EditStack {
     private final Deque<DocumentEdit> undoStack = new ArrayDeque<>();
     private final Deque<DocumentEdit> redoStack = new ArrayDeque<>();
     private final List<Runnable> listeners = new ArrayList<>();
-    private int limit = 500;
+    private final int limit = 500;
 
     public void push(DocumentEdit edit) {
         if (edit == null) {

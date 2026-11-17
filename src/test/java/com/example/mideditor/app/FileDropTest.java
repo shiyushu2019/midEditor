@@ -88,7 +88,7 @@ class FileDropTest {
             stream.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
                 try {
                     Files.deleteIfExists(path);
-                } catch (Exception ignored) {
+                } catch (java.io.IOException ignored) {
                     // 清理失败不影响测试结论
                 }
             });

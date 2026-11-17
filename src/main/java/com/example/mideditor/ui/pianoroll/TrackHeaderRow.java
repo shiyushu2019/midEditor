@@ -206,12 +206,16 @@ public final class TrackHeaderRow extends JPanel {
                 host().setActiveTrack(track);
             }
         });
-        installSelectionOnClick(this);
+        installSelectionOnClick();
         refreshFromModel();
     }
 
     /** 除可交互控件外，单击音轨头任意位置都切换为活动音轨（否则用户很难发现要“点空白处”）。 */
-    private void installSelectionOnClick(java.awt.Component component) {
+    private void installSelectionOnClick() {
+        installSelectionFor(this);
+    }
+
+    private void installSelectionFor(java.awt.Component component) {
         component.addMouseListener(new java.awt.event.MouseAdapter() {
             @Override
             public void mousePressed(java.awt.event.MouseEvent e) {
@@ -227,7 +231,7 @@ public final class TrackHeaderRow extends JPanel {
                 if (child instanceof JTextField) {
                     continue;
                 }
-                installSelectionOnClick(child);
+                installSelectionFor(child);
             }
         }
     }

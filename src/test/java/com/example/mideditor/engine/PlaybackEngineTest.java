@@ -67,6 +67,46 @@ class PlaybackEngineTest {
     }
 
     @Test
+    void stopSilencesSoundingNotes() throws Exception {
+        SynthService synth = new SynthService();
+        synth.open();
+        try {
+            assumeTrue(synth.available(), "当前环境无可用音频设备");
+            MidiDocument document = new MidiDocument(480);
+            Track track = new Track("长音", 0, 0, Color.BLUE);
+            // 第 1 个音立刻发声并持续 4 小节；第 2 个音在 1 拍后（120BPM ≈ 0.5s）开始
+            track.addNote(new Note(60, 0, 4 * 1920L, 100));
+            track.addNote(new Note(64, 480, 1920L, 100));
+            document.addTrack(track);
+            PlaybackPlan plan = PlaybackPlan.build(document, false);
+
+            PlaybackEngine engine = new PlaybackEngine(synth);
+            engine.play(this, plan, 0, false, new PlaybackEngine.LoopRange(0, 0));
+            Thread.sleep(120);
+            assertTrue(synth.activeNoteCount() > 0, "播放中应有发声的音符");
+
+            // 再等到第 2 个音已交给合成器（lookahead 260ms 内）但还没到发声时刻
+            Thread.sleep(300);
+            long offsBefore = synth.noteOffsSent();
+            engine.stop();
+            assertEquals(0, synth.activeNoteCount(), "停止后不应有仍在发声的音符（否则就是“余音绕梁”）");
+            assertTrue(synth.noteOffsSent() > offsBefore,
+                    "停止时要把已经排进合成器队列、还没响的音一并取消");
+
+            // 暂停同样要立刻静音
+            long before = synth.noteEventsSent();
+            engine.play(this, plan, 0, false, new PlaybackEngine.LoopRange(0, 0));
+            Thread.sleep(150);
+            assertTrue(synth.noteEventsSent() > before, "重新播放应继续投递音符");
+            engine.pause();
+            assertEquals(0, synth.activeNoteCount(), "暂停后同样不应有发声的音符");
+            engine.stop();
+        } finally {
+            synth.close();
+        }
+    }
+
+    @Test
     void restartAfterStopDoesNotJumpPlayhead() throws Exception {
         SynthService synth = new SynthService();
         synth.open();

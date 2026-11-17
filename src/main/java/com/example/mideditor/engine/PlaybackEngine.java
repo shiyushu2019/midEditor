@@ -34,10 +34,17 @@ public final class PlaybackEngine {
     private static final long FALLBACK_SLEEP_MS = 3;
     /** note-off 略提前，保证同 tick 的下一条 note-on 不被误杀。 */
     private static final long NOTE_OFF_NUDGE_US = 400;
+    /** 等待调度线程退出的上限（避免停止时与正在投递的事件互相踩）。 */
+    private static final long SCHEDULER_JOIN_MS = 100;
+
+    /** 已交给合成器但还没到时间的 note-on，停止时按同一时间戳补 note-off，避免“余音绕梁”。 */
+    private record PendingNoteOn(int channel, int pitch, long timestamp) {
+    }
 
     private final SynthService synth;
     private final List<Listener> listeners = new CopyOnWriteArrayList<>();
     private final Object lock = new Object();
+    private final java.util.concurrent.ConcurrentLinkedDeque<PendingNoteOn> pendingNoteOns = new java.util.concurrent.ConcurrentLinkedDeque<>();
 
     private volatile State state = State.STOPPED;
     private volatile Object owner;
@@ -45,7 +52,6 @@ public final class PlaybackEngine {
     private volatile boolean loopEnabled;
     private volatile LoopRange loopRange = new LoopRange(0, 0);
 
-    private volatile long anchorTick;
     private volatile long anchorMicros;
     private volatile long anchorNanos;
     private volatile long frozenTick;
@@ -111,8 +117,8 @@ public final class PlaybackEngine {
             }
             frozenTick = currentTick();
             state = State.PAUSED;
-            stopSchedulerThread();
-            synth.allNotesOff();
+            joinScheduler(stopSchedulerThread());
+            panic();
         }
         fireStateChanged();
     }
@@ -120,8 +126,8 @@ public final class PlaybackEngine {
     public void stop() {
         synchronized (lock) {
             state = State.STOPPED;
-            stopSchedulerThread();
-            synth.allNotesOff();
+            joinScheduler(stopSchedulerThread());
+            panic();
             if (plan != null) {
                 anchor(0);
             }
@@ -138,7 +144,7 @@ public final class PlaybackEngine {
             }
             long target = Math.max(0, tick);
             if (state == State.PLAYING) {
-                synth.allNotesOff();
+                panic();
             }
             anchor(target);
             frozenTick = target;
@@ -155,7 +161,7 @@ public final class PlaybackEngine {
             long tick = currentTick();
             plan = newPlan;
             if (state == State.PLAYING) {
-                synth.allNotesOff();
+                panic();
                 anchor(tick);
             } else {
                 frozenTick = tick;
@@ -215,7 +221,6 @@ public final class PlaybackEngine {
             return;
         }
         long target = Math.max(0, tick);
-        anchorTick = target;
         anchorMicros = p.tempo().microsAtTick(target);
         anchorNanos = System.nanoTime();
         cycleOffsetUs = 0;
@@ -245,12 +250,51 @@ public final class PlaybackEngine {
         thread.start();
     }
 
-    private void stopSchedulerThread() {
+    private Thread stopSchedulerThread() {
         Thread thread = scheduler;
         scheduler = null;
-        if (thread != null) {
+        if (thread != null && thread != Thread.currentThread()) {
             thread.interrupt();
+            return thread;
         }
+        return null;
+    }
+
+    /** 等调度线程真正退出：保证接下来 panic 时不会又有事件插进来。 */
+    private void joinScheduler(Thread thread) {
+        if (thread == null) {
+            return;
+        }
+        try {
+            thread.join(SCHEDULER_JOIN_MS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
+     * 立即消音：
+     * <ol>
+     * <li>对已交给合成器、但时间戳还在未来的 note-on，按同一时间点补发 note-off；</li>
+     * <li>向所有通道发延音踏板松开、All Notes Off 与 All Sound Off（后者会直接掐断释放段）。</li>
+     * </ol>
+     * 两件事都做，才能避免“停止/暂停后那个音还在响”。
+     */
+    private void panic() {
+        long now = synth.micros();
+        PendingNoteOn pending;
+        while ((pending = pendingNoteOns.pollFirst()) != null) {
+            try {
+                long timestamp = now >= 0
+                        ? Math.max(now + 1, pending.timestamp() + 1)
+                        : -1;
+                synth.send(new ShortMessage(ShortMessage.NOTE_OFF, pending.channel(), pending.pitch(), 0),
+                        timestamp);
+            } catch (javax.sound.midi.InvalidMidiDataException | RuntimeException ignored) {
+                // 取消失败也无所谓，随后的 allNotesOff 会兵底
+            }
+        }
+        synth.allNotesOff();
     }
 
     private void runScheduler() {
@@ -258,11 +302,11 @@ public final class PlaybackEngine {
             while (state == State.PLAYING) {
                 boolean clock = synth.micros() >= 0;
                 dispatchDue(elapsedMicros() + (clock ? LOOKAHEAD_US : FALLBACK_LOOKAHEAD_US));
-                Thread.sleep(clock ? SCHEDULER_SLEEP_MS : FALLBACK_SLEEP_MS);
+                // 用 parkNanos 代替 Thread.sleep：同样可被 interrupt 提前唤醒，且不占用时间片
+                java.util.concurrent.locks.LockSupport.parkNanos(java.util.concurrent.TimeUnit.MILLISECONDS
+                        .toNanos(clock ? SCHEDULER_SLEEP_MS : FALLBACK_SLEEP_MS));
             }
-        } catch (InterruptedException ignored) {
-            Thread.currentThread().interrupt();
-        } catch (Throwable t) {
+        } catch (RuntimeException t) {
             // 调度异常不应导致 UI 崩溃
         }
     }
@@ -271,6 +315,11 @@ public final class PlaybackEngine {
         PlaybackPlan p = plan;
         if (p == null) {
             return;
+        }
+        long synthNow = synth.micros();
+        if (synthNow >= 0) {
+            // 清掉已经到期的记录，队列只保留“还在未来”的 note-on
+            pendingNoteOns.removeIf(pending -> pending.timestamp() <= synthNow);
         }
         List<PlaybackPlan.Event> events = p.events();
         while (state == State.PLAYING) {
@@ -320,10 +369,13 @@ public final class PlaybackEngine {
                     timestamp -= NOTE_OFF_NUDGE_US;
                 }
                 synth.send(message, timestamp);
+                if (event.command() == ShortMessage.NOTE_ON && event.data2() > 0) {
+                    pendingNoteOns.addLast(new PendingNoteOn(event.channel(), event.data1(), timestamp));
+                }
             } else {
                 synth.send(message);
             }
-        } catch (Exception ignored) {
+        } catch (javax.sound.midi.InvalidMidiDataException | RuntimeException ignored) {
             // 单条事件失败不影响整体播放
         }
     }
@@ -331,8 +383,8 @@ public final class PlaybackEngine {
     private void sendImmediate(PlaybackPlan.Event event) {
         try {
             synth.send(new ShortMessage(event.command(), event.channel(), event.data1(), event.data2()));
-        } catch (Exception ignored) {
-            // 忽略
+        } catch (javax.sound.midi.InvalidMidiDataException | RuntimeException ignored) {
+            // 单条事件失败不影响整体播放
         }
     }
 

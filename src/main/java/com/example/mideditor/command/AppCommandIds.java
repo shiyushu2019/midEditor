@@ -49,6 +49,8 @@ public final class AppCommandIds {
     public static final String PLAY_STOP = "play.stop";
     public static final String PLAY_REWIND = "play.rewind";
     public static final String PLAY_TOGGLE_LOOP = "play.toggleLoop";
+    public static final String PLAY_LOOP_TO_SELECTION = "play.loopToSelection";
+    public static final String PLAY_LOOP_CLEAR = "play.loopClear";
     public static final String PLAY_TOGGLE_METRONOME = "play.toggleMetronome";
 
     public static final String VIEW_TRACKS = "view.tracks";
@@ -64,6 +66,7 @@ public final class AppCommandIds {
     public static final String VIEW_TOGGLE_GRID = "view.toggleGrid";
     public static final String VIEW_FOLLOW_PLAYHEAD = "view.followPlayhead";
     public static final String VIEW_KEYBOARD_RULER = "view.keyboardRuler";
+    public static final String VIEW_C_HIGHLIGHT = "view.cHighlight";
     public static final String VIEW_PITCH_ZOOM_IN = "view.pitchZoomIn";
     public static final String VIEW_PITCH_ZOOM_OUT = "view.pitchZoomOut";
     public static final String VIEW_PITCH_ZOOM_RESET = "view.pitchZoomReset";

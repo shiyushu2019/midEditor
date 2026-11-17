@@ -60,6 +60,9 @@ public final class TrackHeaderColumn extends JPanel {
 
     /** 音轨头由很多子控件组成，把滚轮事件统一转到音轨列表滚动（可交互控件除外）。 */
     private void installWheelForward(java.awt.Component component) {
+        if (component == null) {
+            return;
+        }
         if (!(component instanceof javax.swing.JButton)
                 && !(component instanceof javax.swing.JToggleButton)
                 && !(component instanceof javax.swing.JSlider)

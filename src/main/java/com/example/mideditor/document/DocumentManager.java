@@ -74,7 +74,7 @@ public final class DocumentManager {
             DocumentSession session = register(DocumentFileService.open(path));
             Log.info("打开文档：" + path);
             return session;
-        } catch (Exception e) {
+        } catch (java.io.IOException | javax.sound.midi.InvalidMidiDataException e) {
             Log.error("打开失败：" + e.getMessage());
             JOptionPane.showMessageDialog(app.mainFrame(),
                     "无法打开文件：\n" + path + "\n\n" + e.getMessage(),
@@ -105,8 +105,8 @@ public final class DocumentManager {
             if (session.frame() != null && !session.frame().isSelected()) {
                 try {
                     session.frame().setSelected(true);
-                } catch (Exception ignored) {
-                    // 忽略
+                } catch (java.beans.PropertyVetoException ignored) {
+                    // 选中被否决时忽略
                 }
             }
         }
@@ -166,7 +166,7 @@ public final class DocumentManager {
             Log.info("已保存：" + path);
             app.refreshApplicationState();
             return true;
-        } catch (Exception e) {
+        } catch (java.io.IOException | javax.sound.midi.InvalidMidiDataException e) {
             Log.error("保存失败：" + e.getMessage());
             JOptionPane.showMessageDialog(app.mainFrame(),
                     "保存失败：\n" + e.getMessage(), "保存失败", JOptionPane.ERROR_MESSAGE);
@@ -186,7 +186,7 @@ public final class DocumentManager {
         try {
             com.example.mideditor.io.MidiFileCodec.write(session.document(), path);
             Log.info("已导出：" + path);
-        } catch (Exception e) {
+        } catch (java.io.IOException | javax.sound.midi.InvalidMidiDataException e) {
             Log.error("导出失败：" + e.getMessage());
             JOptionPane.showMessageDialog(app.mainFrame(),
                     "导出失败：\n" + e.getMessage(), "导出失败", JOptionPane.ERROR_MESSAGE);
@@ -232,8 +232,8 @@ public final class DocumentManager {
             if (active != null && active.frame() != null && !active.frame().isIcon()) {
                 try {
                     active.frame().setSelected(true);
-                } catch (Exception ignored) {
-                    // 忽略
+                } catch (java.beans.PropertyVetoException ignored) {
+                    // 选中被否决时忽略
                 }
             }
         }

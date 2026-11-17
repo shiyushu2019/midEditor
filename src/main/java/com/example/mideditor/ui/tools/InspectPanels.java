@@ -249,6 +249,7 @@ final class InspectPanels {
         private final JCheckBox visibleBox = new JCheckBox("显示网格线");
         private final JCheckBox snapBox = new JCheckBox("吸附到网格");
         private final JCheckBox keyboardRulerBox = new JCheckBox("显示键盘标尺");
+        private final JCheckBox cHighlightBox = new JCheckBox("Do（C）高亮");
         private final JComboBox<GridSettings.NoteLength> noteLengthBox = new JComboBox<>(
                 GridSettings.NoteLength.values());
         private final JSpinner customTicksSpinner = new JSpinner(new SpinnerNumberModel(240, 1, 15360, 10));
@@ -318,6 +319,20 @@ final class InspectPanels {
                 }
             });
 
+            cHighlightBox.setFont(Theme.SMALL_FONT);
+            cHighlightBox.setOpaque(false);
+            cHighlightBox.setToolTipText("把每个八度的起点（Do / C）在频谱和键盘标尺上高亮（Ctrl+Shift+K）");
+            cHighlightBox.addActionListener(e -> {
+                if (updating) {
+                    return;
+                }
+                MidiDocumentView view = app.activeView();
+                if (view != null && view.cHighlightVisible() != cHighlightBox.isSelected()) {
+                    view.toggleCHighlight();
+                    app.refreshCommandStates();
+                }
+            });
+
             noteLengthBox.setFont(Theme.SMALL_FONT);
             noteLengthBox.setToolTipText("在坐标空白处添加平行线时使用的默认长度");
             noteLengthBox.addActionListener(e -> {
@@ -357,6 +372,7 @@ final class InspectPanels {
             add(customRow);
             add(javax.swing.Box.createVerticalStrut(6));
             add(keyboardRulerBox);
+            add(cHighlightBox);
 
             add(javax.swing.Box.createVerticalStrut(6));
             add(caption("频率轴（每轨可见半音数）"));
@@ -417,27 +433,29 @@ final class InspectPanels {
                 visibleBox.setEnabled(enabled);
                 snapBox.setEnabled(enabled);
                 keyboardRulerBox.setEnabled(enabled);
+                cHighlightBox.setEnabled(enabled);
                 noteLengthBox.setEnabled(enabled);
                 customTicksSpinner.setEnabled(enabled);
                 pitchRowsSpinner.setEnabled(enabled);
                 pitchAllTracksBox.setEnabled(enabled);
                 pitchFitButton.setEnabled(enabled);
-                if (!enabled) {
+                if (view != null) {
+                    resolutionBox.setSelectedItem(view.grid().resolution());
+                    visibleBox.setSelected(view.grid().visible());
+                    snapBox.setSelected(view.grid().snapEnabled());
+                    keyboardRulerBox.setSelected(view.keyboardRulerVisible());
+                    cHighlightBox.setSelected(view.cHighlightVisible());
+                    noteLengthBox.setSelectedItem(view.grid().noteLength());
+                    customTicksSpinner.setValue(view.grid().customNoteTicks());
+                    customTicksSpinner.setEnabled(view.grid().noteLength() == GridSettings.NoteLength.CUSTOM);
+                    long step = view.grid().step(view.document().ppq());
+                    stepLabel.setText(step > 0 ? "步长：" + step + " ticks" : "步长：关闭");
+                    int pitchRows = view.activePitchRows();
+                    if (pitchRows > 0) {
+                        pitchRowsSpinner.setValue(pitchRows);
+                    }
+                } else {
                     stepLabel.setText("步长：-");
-                    return;
-                }
-                resolutionBox.setSelectedItem(view.grid().resolution());
-                visibleBox.setSelected(view.grid().visible());
-                snapBox.setSelected(view.grid().snapEnabled());
-                keyboardRulerBox.setSelected(view.keyboardRulerVisible());
-                noteLengthBox.setSelectedItem(view.grid().noteLength());
-                customTicksSpinner.setValue(view.grid().customNoteTicks());
-                customTicksSpinner.setEnabled(view.grid().noteLength() == GridSettings.NoteLength.CUSTOM);
-                long step = view.grid().step(view.document().ppq());
-                stepLabel.setText(step > 0 ? "步长：" + step + " ticks" : "步长：关闭");
-                int pitchRows = view.activePitchRows();
-                if (pitchRows > 0) {
-                    pitchRowsSpinner.setValue(pitchRows);
                 }
             } finally {
                 updating = false;

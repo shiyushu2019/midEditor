@@ -91,6 +91,12 @@ final class ViewCommands {
                 CommandContext::hasDocument,
                 ctx -> ctx.hasDocument() && ctx.document().keyboardRulerVisible()));
 
+        registry.register(new AppCommand(AppCommandIds.VIEW_C_HIGHLIGHT, "Do（C）高亮", CommandScope.DOCUMENT,
+                FileCommands.key(KeyEvent.VK_K, InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK),
+                ctx -> ctx.document().toggleCHighlight(),
+                CommandContext::hasDocument,
+                ctx -> ctx.hasDocument() && ctx.document().cHighlightVisible()));
+
         // ---- 频率轴（音域）：滚轮 / 快捷键 / 菜单都能缩放与滑动
         Predicate<CommandContext> hasActiveTrack = CommandContext::hasTrack;
         registry.register(new AppCommand(AppCommandIds.VIEW_PITCH_ZOOM_IN, "音域放大", CommandScope.DOCUMENT,

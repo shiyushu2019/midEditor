@@ -38,6 +38,7 @@ public final class AppContext {
     public void initialize(JComponent keyTarget) {
         registry = new CommandRegistry(keyTarget);
         router = new CommandRouter(registry);
+        registry.setRouter(router);
         router.setContextSupplier(this::currentContext);
         CommandInstaller.install(this);
         documents.addChangeListener(this::refreshApplicationState);
@@ -160,6 +161,9 @@ public final class AppContext {
 
     public void shutdown() {
         playback.stop();
-        synth.close();
+        // SynthService 是 AutoCloseable，用 try-with-resources 保证释放
+        try (SynthService audio = synth) {
+            audio.close();
+        }
     }
 }

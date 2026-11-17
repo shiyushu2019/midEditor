@@ -18,11 +18,9 @@ public final class DockPanel extends JPanel {
     private final String id;
     private final String title;
     private final JComponent content;
-    private final DockManager manager;
 
     DockPanel(DockManager manager, String id, String title, JComponent content) {
         super(new BorderLayout());
-        this.manager = manager;
         this.id = id;
         this.title = title;
         this.content = content;
