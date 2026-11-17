@@ -110,6 +110,8 @@ public final class MenuBarBuilder {
         JMenu lines = new JMenu("平行线");
         lines.setFont(Theme.BASE_FONT);
         item(lines, AppCommandIds.NOTE_ADD, "添加平行线");
+        item(lines, AppCommandIds.NOTE_LOCK, "收尾锁定（连到相邻平行线）");
+        item(lines, AppCommandIds.NOTE_UNLOCK, "解除锁定");
         item(lines, AppCommandIds.NOTE_DELETE, "删除平行线");
         item(lines, AppCommandIds.NOTE_SPLIT, "拆分平行线（右键位置）");
         lines.addSeparator();
@@ -176,7 +178,6 @@ public final class MenuBarBuilder {
         checkItem(menu, AppCommandIds.VIEW_FOLLOW_PLAYHEAD, "播放头跟随");
         checkItem(menu, AppCommandIds.VIEW_KEYBOARD_RULER, "键盘标尺(K)");
         checkItem(menu, AppCommandIds.VIEW_C_HIGHLIGHT, "Do（C）高亮");
-
         JMenu pitch = new JMenu("音域（频率轴）");
         pitch.setFont(Theme.BASE_FONT);
         item(pitch, AppCommandIds.VIEW_PITCH_ZOOM_IN, "放大（更少半音、行更高）");

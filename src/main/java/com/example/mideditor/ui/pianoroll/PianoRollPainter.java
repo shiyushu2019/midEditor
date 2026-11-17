@@ -18,6 +18,9 @@ import com.example.mideditor.ui.theme.Theme;
  */
 final class PianoRollPainter {
 
+    /** 活动音轨在左侧的高亮条宽度（像素）。 */
+    private static final int ACTIVE_LANE_BAR = 3;
+
     private PianoRollPainter() {
     }
 
@@ -42,6 +45,7 @@ final class PianoRollPainter {
         }
 
         paintLoopRegion(g, view, host, clip);
+        paintLocks(g, view, document, clip);
         paintPlayhead(g, view, host, clip);
 
         Rectangle marquee = canvas.marquee();
@@ -83,6 +87,12 @@ final class PianoRollPainter {
 
         long firstTick = timeline.tickAtX(clip.x, ppq);
         long lastTick = timeline.tickAtX(clip.x + clip.width, ppq);
+        boolean active = host.activeTrack() == track;
+        if (active) {
+            // 活动泳道：只在行背景上叠一层很淡的蓝（不染到平行线上）
+            g.setColor(Theme.LANE_ACTIVE_TINT);
+            g.fillRect(clip.x, laneTop, clip.width, laneHeight - 1);
+        }
         long beatTicks = TimeMath.beatTicks(document, firstTick);
         long barTicks = TimeMath.barTicks(document, firstTick);
         long step = host.grid().step(ppq);
@@ -105,7 +115,7 @@ final class PianoRollPainter {
             }
         }
 
-        boolean active = host.activeTrack() == track;
+        boolean laneActive = host.activeTrack() == track;
         List<Note> notes = track.notes();
         int startIndex = firstIndexAtOrAfter(notes, firstTick);
         int backSteps = 0;
@@ -120,14 +130,19 @@ final class PianoRollPainter {
             if (note.endTick() < firstTick || note.pitch() < range.low() || note.pitch() >= range.high()) {
                 continue;
             }
-            paintParallelLine(g, view, host, timeline, ppq, laneIndex, track, note, active);
+            paintParallelLine(g, view, host, timeline, ppq, laneIndex, track, note, laneActive);
         }
 
         g.setColor(Theme.LANE_SEPARATOR);
         g.drawLine(clip.x, laneTop + laneHeight - 1, clip.x + clip.width, laneTop + laneHeight - 1);
-        if (active) {
-            g.setColor(new Color(0x3D8BFD));
-            g.drawRect(0, laneTop, Math.max(clip.width, view.getWidth()) - 1, laneHeight - 1);
+        if (laneActive) {
+            // 左侧窄高亮条：位置按“视口左边界”固定，不能跟着局部重绘的 clip 跑，
+            // 否则播放头每重绘一窄条就在那里留下一根竖线。
+            int left = view.visibleRect().x;
+            if (left < clip.x + clip.width && left + ACTIVE_LANE_BAR > clip.x) {
+                g.setColor(Theme.ACCENT);
+                g.fillRect(left, laneTop, ACTIVE_LANE_BAR, laneHeight - 1);
+            }
         }
     }
 
@@ -139,13 +154,19 @@ final class PianoRollPainter {
         int width = Math.max(3, x2 - x1);
         int rowY = view.rowTop(track, laneIndex, note.pitch());
         int rowHeight = Math.max(1, view.rowBottom(track, laneIndex, note.pitch()) - rowY);
+        boolean selected = host.selection().contains(note);
+
+        if (note.isRest()) {
+            paintRest(g, x1, x2, width, rowY, rowHeight, selected, laneActive);
+            return;
+        }
+
         int maxThickness = Math.max(1, rowHeight - 1);
         int thickness = 1 + (int) Math.round((maxThickness - 1) * (note.velocity() / 127.0));
         thickness = Math.max(1, Math.min(thickness, maxThickness));
         int y = rowY + (rowHeight - thickness) / 2;
 
         Color base = track.color();
-        boolean selected = host.selection().contains(note);
         boolean sounding = host.isNoteSounding(note);
 
         Color fill;
@@ -161,6 +182,76 @@ final class PianoRollPainter {
             g.setColor(Theme.SELECTION_OUTLINE);
             g.drawRect(x1, y, Math.max(2, width - 1), thickness - 1);
         }
+    }
+
+    /** 休止符：红色线段（与平行线同地位，可选中 / 拖动 / 锁定，但不发声）。 */
+    private static void paintRest(Graphics2D g, int x1, int x2, int width, int rowY, int rowHeight,
+            boolean selected, boolean laneActive) {
+        int thickness = rowHeight >= 8 ? 3 : 2;
+        int barY = rowY + Math.max(1, (rowHeight - thickness) / 2);
+        g.setColor(laneActive ? Theme.REST_COLOR : Theme.REST_COLOR.darker());
+        g.fillRect(x1, barY, width, Math.min(thickness, Math.max(1, rowHeight)));
+        // 两端小竖线，让休止符看起来是"一段"而不是"一条线"
+        if (rowHeight >= 5) {
+            int top = rowY + 1;
+            int height = rowHeight - 2;
+            g.fillRect(x1, top, 1, height);
+            g.fillRect(Math.max(x1, x2 - 1), top, 1, height);
+        }
+        if (selected) {
+            g.setColor(Theme.REST_SELECTED);
+            g.drawRect(x1, barY - 1, Math.max(2, width - 1), thickness + 1);
+        }
+    }
+
+    /** 收尾锁定：在上一条的尾部画空心圆（跨音高时连一条竖线）。 */
+    private static void paintLocks(Graphics2D g, PianoRollView view,
+            MidiDocument document, Rectangle clip) {
+        int ppq = document.ppq();
+        TimelineModel timeline = view.timeline();
+        for (int laneIndex = 0; laneIndex < document.tracks().size(); laneIndex++) {
+            Track track = document.tracks().get(laneIndex);
+            int laneTop = view.laneTop(laneIndex);
+            if (laneTop > clip.y + clip.height || laneTop + view.laneHeight() < clip.y) {
+                continue;
+            }
+            for (Note follower : track.notes()) {
+                if (!follower.locked()) {
+                    continue;
+                }
+                Note leader = track.noteById(follower.lockLeaderId());
+                if (leader == null) {
+                    continue;
+                }
+                int x = timeline.xAtTick(leader.endTick(), ppq);
+                int y = rowCenter(view, track, laneIndex, leader.pitch());
+                int followerY = rowCenter(view, track, laneIndex, follower.pitch());
+                if (x < clip.x - 8 || x > clip.x + clip.width + 8) {
+                    continue;
+                }
+                if (followerY != y) {
+                    g.setColor(new Color(0xE7, 0xEC, 0xF3, 0x88));
+                    g.drawLine(x, Math.min(y, followerY), x, Math.max(y, followerY));
+                }
+                // 空心圆：先用底色把圆内挖空，再描边，避免看起来像个小方块
+                int radius = 4;
+                g.setColor(rowBackColor(leader.pitch()));
+                g.fillOval(x - radius + 1, y - radius + 1, radius * 2 - 2, radius * 2 - 2);
+                g.setColor(Theme.LOCK_RING);
+                g.drawOval(x - radius, y - radius, radius * 2, radius * 2);
+            }
+        }
+    }
+
+    private static int rowCenter(PianoRollView view, Track track, int laneIndex, int pitch) {
+        int top = view.rowTop(track, laneIndex, pitch);
+        int bottom = view.rowBottom(track, laneIndex, pitch);
+        return (top + bottom) / 2;
+    }
+
+    /** 某一音高所在行的底色（用于把锁定圆点挖成空心）。 */
+    private static Color rowBackColor(int pitch) {
+        return isBlackKey(pitch) ? Theme.ROW_BLACK : Theme.ROW_WHITE;
     }
 
     private static void paintPlayhead(Graphics2D g, PianoRollView view, MidiDocumentView host, Rectangle clip) {

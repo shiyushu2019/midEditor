@@ -5,6 +5,7 @@ import java.awt.event.KeyEvent;
 
 import com.example.mideditor.app.AppContext;
 import com.example.mideditor.document.MidiDocumentView;
+import com.example.mideditor.domain.Note;
 import com.example.mideditor.ui.theme.Icons;
 
 /** 编辑 / 平行线 / 音轨命令。 */
@@ -101,6 +102,13 @@ final class EditCommands {
                 ctx -> ctx.document().addNoteAt(ctx.activeTrack(),
                         ctx.document().pendingAddTick(), ctx.document().pendingAddPitch()),
                 CommandContext::hasTrack, null));
+
+        registry.register(new AppCommand(AppCommandIds.NOTE_LOCK, "收尾锁定", CommandScope.SELECTION,
+                null, ctx -> ctx.document().lockSelection(), CommandContext::hasSelection, null));
+
+        registry.register(new AppCommand(AppCommandIds.NOTE_UNLOCK, "解除锁定", CommandScope.SELECTION,
+                null, ctx -> ctx.document().unlockSelection(),
+                EditCommands::anyLockTouchesSelection, null));
 
         registry.register(new AppCommand(AppCommandIds.NOTE_DELETE, "删除平行线", CommandScope.SELECTION,
                 null, ctx -> ctx.document().deleteSelection(), CommandContext::hasSelection, null));
@@ -204,5 +212,27 @@ final class EditCommands {
         registry.register(new AppCommand(AppCommandIds.TRACK_TOGGLE_SOLO, "独奏音轨", CommandScope.TRACK,
                 null, ctx -> ctx.document().toggleSolo(ctx.activeTrack()), CommandContext::hasTrack,
                 ctx -> ctx.hasTrack() && ctx.activeTrack().solo()));
+    }
+
+    /** 选中项是否与任何收尾锁定相关（自己锁着别人，或被别人锁着）→ 决定「解除锁定」是否可点。 */
+    private static boolean anyLockTouchesSelection(CommandContext ctx) {
+        if (!ctx.hasSelection()) {
+            return false;
+        }
+        java.util.Set<java.util.UUID> ids = new java.util.HashSet<>();
+        for (Note note : ctx.selection()) {
+            ids.add(note.id());
+        }
+        for (var track : ctx.document().document().tracks()) {
+            for (Note note : track.notes()) {
+                if (note.lockLeaderId() == null) {
+                    continue;
+                }
+                if (ids.contains(note.id()) || ids.contains(note.lockLeaderId())) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 }

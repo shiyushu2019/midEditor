@@ -281,6 +281,18 @@ public final class SynthService implements AutoCloseable {
         return available;
     }
 
+    /**
+     * 仅供测试：接一个假的 Receiver（无真实音频设备），
+     * 时钟不可用时会走 lookahead 的回退分支，正好能验证调度/静音逻辑。
+     */
+    static SynthService forTesting(Receiver receiver) {
+        SynthService service = new SynthService();
+        service.receiver = receiver;
+        service.available = true;
+        service.description = "测试后端";
+        return service;
+    }
+
     public String description() {
         return description;
     }

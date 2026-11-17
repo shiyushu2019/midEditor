@@ -32,6 +32,10 @@ final class PianoRollContextMenu {
             menu.addSeparator();
             menu.add(registry.action(AppCommandIds.NOTE_DELETE));
             menu.add(registry.action(AppCommandIds.NOTE_SPLIT));
+            menu.addSeparator();
+            menu.add(registry.action(AppCommandIds.NOTE_LOCK));
+            menu.add(registry.action(AppCommandIds.NOTE_UNLOCK));
+            menu.addSeparator();
 
             JMenu move = new JMenu("移动平行线");
             move.add(registry.action(AppCommandIds.NOTE_MOVE_UP));

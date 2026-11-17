@@ -39,7 +39,14 @@ public final class Theme {
     public static final Color TEXT_ON_DARK = new Color(0xE7ECF3);
     public static final Color TEXT_MUTED = new Color(0x9AA6B4);
     public static final Color PLAYHEAD = new Color(0xFF5D5D);
+    /** 休止符（不发声的平行线）用红色线段表示。 */
+    public static final Color REST_COLOR = new Color(0xE05252);
+    public static final Color REST_SELECTED = new Color(0xFFD08A);
+    /** 收尾锁定标记：空心圆。 */
+    public static final Color LOCK_RING = new Color(0xE7ECF3);
     public static final Color SELECTION_OUTLINE = new Color(0xFFE082);
+    /** 活动音轨泳道底色（很淡的一层，代替以前那种整条泳道的蓝框）。 */
+    public static final Color LANE_ACTIVE_TINT = new Color(0x3D, 0x8B, 0xFD, 0x12);
     public static final Color SOUNDING = new Color(0xFFF3BF);
     public static final Color LOOP_REGION = new Color(0x3D8BFD);
     public static final Color KEY_WHITE = new Color(0xDDE2E8);

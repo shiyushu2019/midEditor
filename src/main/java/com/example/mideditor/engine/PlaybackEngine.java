@@ -55,6 +55,8 @@ public final class PlaybackEngine {
     private volatile long anchorMicros;
     private volatile long anchorNanos;
     private volatile long frozenTick;
+    /** 计划代号：每次换计划 / 重新锚定就 +1，调度线程一旦发现代号变了就立即停手，不再发旧事件。 */
+    private volatile long planEpoch;
 
     private int nextIndex;
     private long cycleOffsetUs;
@@ -97,7 +99,10 @@ public final class PlaybackEngine {
             return;
         }
         synchronized (lock) {
-            stopSchedulerThread();
+            // 等旧调度线程真正退出，否则它手上的旧批次会在新计划生效后继续发出去
+            joinScheduler(stopSchedulerThread());
+            planEpoch++;
+            pendingNoteOns.clear();
             synth.resetAllChannels();
             this.owner = owner;
             this.plan = newPlan;
@@ -146,6 +151,7 @@ public final class PlaybackEngine {
             if (state == State.PLAYING) {
                 panic();
             }
+            planEpoch++;
             anchor(target);
             frozenTick = target;
         }
@@ -159,6 +165,7 @@ public final class PlaybackEngine {
                 return;
             }
             long tick = currentTick();
+            planEpoch++;
             plan = newPlan;
             if (state == State.PLAYING) {
                 panic();
@@ -175,6 +182,7 @@ public final class PlaybackEngine {
             this.loopEnabled = enabled && this.loopRange.valid();
             if (state == State.PLAYING) {
                 // 保证循环边界变化后仍然连续
+                planEpoch++;
                 anchor(currentTick());
             }
         }
@@ -285,9 +293,9 @@ public final class PlaybackEngine {
         PendingNoteOn pending;
         while ((pending = pendingNoteOns.pollFirst()) != null) {
             try {
-                long timestamp = now >= 0
-                        ? Math.max(now + 1, pending.timestamp() + 1)
-                        : -1;
+                // 同一时间戳（而不是 +1µs）：合成器按到达顺序处理，note-on 后紧跟 note-off，
+                // 连一个采样块的发声都不会漏出来
+                long timestamp = now >= 0 ? Math.max(now, pending.timestamp()) : -1;
                 synth.send(new ShortMessage(ShortMessage.NOTE_OFF, pending.channel(), pending.pitch(), 0),
                         timestamp);
             } catch (javax.sound.midi.InvalidMidiDataException | RuntimeException ignored) {
@@ -312,6 +320,7 @@ public final class PlaybackEngine {
     }
 
     private void dispatchDue(double horizonUs) {
+        long epoch = planEpoch;
         PlaybackPlan p = plan;
         if (p == null) {
             return;
@@ -323,6 +332,11 @@ public final class PlaybackEngine {
         }
         List<PlaybackPlan.Event> events = p.events();
         while (state == State.PLAYING) {
+            // 计划已被换掉（静音、独奏、编辑、seek）：这批旧事件立刻作废，
+            // 否则旧计划里的音符会在新计划生效后又“漏”出去一小段
+            if (epoch != planEpoch || plan != p) {
+                return;
+            }
             if (nextIndex >= events.size()) {
                 if (loopEnabled && loopRange.valid()) {
                     nextIndex = p.indexAtTick(loopRange.startTick());
@@ -344,6 +358,9 @@ public final class PlaybackEngine {
             double dueUs = p.tempo().microsAtTick(event.tick()) + cycleOffsetUs - anchorMicros;
             if (dueUs > horizonUs) {
                 break;
+            }
+            if (epoch != planEpoch || plan != p) {
+                return;
             }
             sendScheduled(event, dueUs);
             nextIndex++;

@@ -27,6 +27,8 @@ public final class AppCommandIds {
     public static final String EDIT_SPLIT_AT_PLAYHEAD = "edit.splitAtPlayhead";
 
     public static final String NOTE_ADD = "note.add";
+    public static final String NOTE_LOCK = "note.lock";
+    public static final String NOTE_UNLOCK = "note.unlock";
     public static final String NOTE_DELETE = "note.delete";
     public static final String NOTE_SPLIT = "note.split";
     public static final String NOTE_MOVE_UP = "note.moveUp";

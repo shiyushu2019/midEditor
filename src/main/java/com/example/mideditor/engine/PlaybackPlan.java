@@ -56,6 +56,9 @@ public final class PlaybackPlan {
                 events.add(new Event(raw.tick(), raw.command(), channel, raw.data1(), raw.data2()));
             }
             for (Note note : track.notes()) {
+                if (note.isRest()) {
+                    continue; // 休止符是可视化占位，不发声
+                }
                 endTick = Math.max(endTick, note.endTick());
                 events.add(new Event(note.startTick(), ShortMessage.NOTE_ON, channel, note.pitch(), note.velocity()));
                 events.add(new Event(note.endTick(), ShortMessage.NOTE_OFF, channel, note.pitch(), 0));

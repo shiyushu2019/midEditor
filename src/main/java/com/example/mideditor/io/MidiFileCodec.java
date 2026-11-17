@@ -43,6 +43,8 @@ public final class MidiFileCodec {
     private static final int META_TIME_SIGNATURE = 0x58;
     private static final int DRUM_CHANNEL = 9;
     private static final String RANGE_MARKER = "mideditor:yRange=";
+    /** 休止符（可视化占位）不入 MIDI 音符事件，存在自定义 text meta 里。 */
+    private static final String REST_MARKER = "mideditor:rest=";
 
     private MidiFileCodec() {
     }
@@ -111,6 +113,7 @@ public final class MidiFileCodec {
         for (javax.sound.midi.Track midiTrack : sequence.getTracks()) {
             String trackName = findTrackName(midiTrack);
             PitchRange storedRange = findStoredRange(midiTrack);
+            List<Note> storedRests = findStoredRests(midiTrack);
             Map<Integer, ChannelData> channels = new LinkedHashMap<>();
             Map<Integer, Deque<long[]>> pendingNotes = new HashMap<>();
 
@@ -126,6 +129,13 @@ public final class MidiFileCodec {
             }
 
             int channelsInTrack = channels.size();
+            if (!storedRests.isEmpty()) {
+                if (channels.isEmpty()) {
+                    // 整轨只有休止符：也得建出音轨
+                    channels.put(0, new ChannelData(0));
+                }
+                channels.values().iterator().next().notes.addAll(storedRests);
+            }
             for (ChannelData data : channels.values()) {
                 if (data.notes.isEmpty() && !data.programSeen) {
                     continue;
@@ -196,6 +206,34 @@ public final class MidiFileCodec {
             }
         }
         return null;
+    }
+
+    /** 读回自定义标记里保存的休止符（pitch,start,duration）。 */
+    private static List<Note> findStoredRests(javax.sound.midi.Track midiTrack) {
+        List<Note> rests = new ArrayList<>();
+        for (int i = 0; i < midiTrack.size(); i++) {
+            MidiMessage message = midiTrack.get(i).getMessage();
+            if (!(message instanceof MetaMessage meta) || meta.getType() != META_MARKER_TEXT) {
+                continue;
+            }
+            String text = decodeText(meta.getData());
+            if (!text.startsWith(REST_MARKER)) {
+                continue;
+            }
+            String[] parts = text.substring(REST_MARKER.length()).split(",");
+            if (parts.length != 3) {
+                continue;
+            }
+            try {
+                int pitch = Integer.parseInt(parts[0].trim());
+                long start = Long.parseLong(parts[1].trim());
+                long duration = Long.parseLong(parts[2].trim());
+                rests.add(Note.rest(pitch, start, duration));
+            } catch (NumberFormatException ignored) {
+                // 忽略非法标记
+            }
+        }
+        return rests;
     }
 
     private static int resolveChannel(int preferred, boolean[] used) {
@@ -281,6 +319,12 @@ public final class MidiFileCodec {
                         shortMessage(raw.command(), track.channel(), raw.data1(), raw.data2()), raw.tick()));
             }
             for (Note note : track.notes()) {
+                if (note.isRest()) {
+                    midiTrack.add(new MidiEvent(metaMessage(META_MARKER_TEXT,
+                            REST_MARKER + note.pitch() + "," + note.startTick() + "," + note.durationTicks()),
+                            note.startTick()));
+                    continue;
+                }
                 midiTrack.add(new MidiEvent(
                         shortMessage(ShortMessage.NOTE_ON, track.channel(), note.pitch(), note.velocity()),
                         note.startTick()));

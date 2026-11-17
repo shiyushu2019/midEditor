@@ -169,6 +169,8 @@ public final class Note {
     private long startTick;
     private long durationTicks;            // > 0
     private int velocity;                  // 1-127（决定平行线粗细）
+    private boolean rest;                  // true = 休止符（红色线段，不发声，其余待遇与平行线一致）
+    private UUID lockLeaderId;             // 收尾锁定：指向被锁定的前一条的 id
 }
 
 public record PitchRange(int low, int high) {}
@@ -199,7 +201,8 @@ public interface DocumentEdit { String label(); void undo(); void redo(); boolea
 **性能**
 - 视口虚拟化：按 tick 区间二分查找可见平行线，只绘制可见部分 + 1 屏预取。
 - 背景（网格 + 键盘条带）缓存为 `BufferedImage`，键 = (trackId, zoom, scrollX, scrollY, size, theme)，滚动/缩放变化才失效。
-- 播放头动画只 `repaint` 播放头新旧位置的窄条（约 8 px 宽），不触发全量重绘；泳道内容变化用脏矩形合并。
+- 播放头动画只 `repaint` 播放头新旧位置的窄条（约 8 px 宽，见 `PianoRollView.repaintPlayhead`），不触发全量重绘；泳道内容变化用脏矩形合并。
+- **局部重绘的硬约束**：`paint()` 里一切「位置固定」的装饰（活动音轨左侧高亮条、锁定圆点、循环区）都必须按 **tick / 视口左边界**（`view.visibleRect().x`）定位，**绝不能**用 `clip.x` —— 播放头每帧只刷一条窄带，用 `clip.x` 就会在窄带起点一路留下竖线（曾经踩过：活动音轨高亮条变成"播放头竖线状尾迹"）。回归测试：`ActiveLanePaintTest`。
 - 双缓冲由 Swing 默认提供；动画由独立 `javax.swing.Timer`（60 Hz）+ EDT 合并重绘。
 
 **命中与交互**：`HitTester` 统一提供 `hitAt(x,y)`（命中平行线主体 / 右端手柄 6 px / 空白）；`DragSession` 三种模式：MOVE（pitch+time）、RESIZE_END（duration）、MARQUEE。
@@ -339,9 +342,68 @@ public interface DocumentEdit { String label(); void undo(); void redo(); boolea
 新增 `PlaybackEngineTest.stopSilencesSoundingNotes`（长音 + 已排队未响的音，停止后 `activeNoteCount()==0` 且确实补发了 note-off；暂停同样验证），测试总计 41 项。
 
 ### v1.5 音域完整性与 Do（C）高亮
-
 - **音域是完整的**：`Note.pitch` 夹紧在 `0..127`，`PitchRange` 上限 128 行，即 MIDI 全部 128 个半音（C-1 到 G9）都能建模、编辑、播放与显示；钢琴 A0(21)–C8(108)、鼓组 35–81 都包含在内。之前“看不到”只是默认音域窗口只有 30 个半音，拉满 128 行（Ctrl+Alt+0 后再缩，或「显示全部音域」）即可全见。新增 `PitchAxisTest.pitchRangeCoversEveryMidiPitch` 固定这个约束。
 - **Do（C）高亮**：不再用色块/描边，而是在 `pitch % 12 == 0` 的行**内部叠加一层半透明黄色**（`Theme.C_TINT`，alpha 0x3A），键盘标尺对应键叠 `C_TINT_KEY`（alpha 0x5C）+ 深琥珀色八度标注；既不抢音轨平行线的颜色，也不在频谱里多出一堆框线。可用 视图 → Do（C）高亮 / Ctrl+Shift+K 或网格设置面板开关（默认开）。
+
+### v1.6 拖拽吸附：网格 + 贴相邻平行线
+
+- `MidiDocumentView.applySelectionMove` 先按“第一个被拖动的平行线”为锚点计算一次吸附量，再整体平移（多选时相对间距不变）。
+- 吸附优先级：**同泳道其它平行线的两端**（自己的起点贴到上一条的终点 = 紧接上一个；自己的终点贴到下一条的起点 = 正好让出下一个）> 网格吸附（`GridSettings.snap`）。
+- 吸附半径按像素换算成 tick（`EDGE_SNAP_PIXELS = 8`，随缩放换算），手感与缩放无关；`吸附到网格` 关掉时不做任何吸附；纯上下拖动（`deltaTicks == 0`）不改横坐标。
+- 新增 `SnapToNeighbourTest` 4 项（贴上一条终点、贴下一条起点、多选保持相对间距、关闭吸附时保持原值），测试总计 47 项。
+
+### v1.7 休止符实体化 + 收尾锁定
+
+**休止符不再靠"没有平行线"表示**，而是正式对象：
+
+- `Note` 增加 `boolean rest` 与工厂方法 `Note.rest(pitch, start, dur)`；`copy()` 保留该标记，`notesEqual` 一并比较，所以撤销/重做、剪贴板、拆分都认得它。
+- 渲染：`PianoRollPainter.paintRest` 画一条**红色线段**（`Theme.REST_COLOR`，两端有小竖线，选中时用 `REST_SELECTED` 描边），位置、长度、命中测试与平行线完全一致 —— 可框选、拖动、拉长、量化、改力度、拆分、锁定、删除。
+- 语义：`PlaybackPlan` 跳过 `note.isRest()`；`auditionNote` 也直接返回，所以它不发声、不占用合成器通道。
+- 持久化：`MidiFileCodec` 不为休止符写音符事件（否则别的 DAW 会当成真音），而是写一条自定义 text meta `mideditor:rest=<pitch>,<start>,<duration>`；读文件时 `findStoredRests` 解析回来并挂到该轨第一个 `ChannelData`（轨道为空时新建一个），因此保存 → 重新打开不丢。
+
+**收尾锁定**给两条平行线的接缝上锁，形成"这一句"的整体：
+
+- `Note.lockLeaderId`（UUID）指向被锁定的前一条，`locked()` 即非空；锁定处画**空心圆**（`Theme.LOCK_RING`，先用行底色挖空再描边，跨音高时补一条半透明竖线）。
+- 锁定入口 `MidiDocumentView.lockSelection()`：选中 ≥ 2 条按时间顺序逐对 `link()`（前一条的 `endTick` 作为后一条的 `startTick`）；只选 1 条时用 `nextAfter()` 找同轨后面最近的一条来连。
+- 移动入口统一走 `movingIds(track)`：从选中集合出发，沿 `lockLeaderId` 双向闭包，把整条链一起纳入；`moveSelection`（方向键）与 `beginSelectionEdit` / `applySelectionMove`（鼠标拖拽）都用它，所以拖任意一段都是整组平移、接缝不会散，吸附也只按整组算一次。
+- `unlockSelection()` 双向清理（自己锁别人的、别人锁自己的都解开）；删除平行线时顺手清掉指向已删对象的悬空锁。
+- 新增 `RestAndLockTest` 4 项（休止符不发声但可插入/选中、锁定后首尾对齐并整组移动、解除后独立移动、休止符 .mid 往返），测试总计 51 项。
+
+**锁定与「长度」的关系：只移动，不缩放**（v1.7 修订）
+
+- 拖动右端 / `Shift+←→` 只改**用户真正选中的那条**的长度：拖拽事务里 `beginSelectionEdit` 额外记 `primarySelection`，`applySelectionResize` / `resizeSelection` 只按它改 `duration`，因锁定被纳入的同伴不参与缩放。
+- 长度变化后由 `reflowLocks(tracks)` 重新贴齐：后一条的 `startTick = 前一条.endTick`（**只移位置**），沿链传递，`guard` 限 512 次防成环。于是「拖 B 的右端」锁点不动、A 不变长；「拖 A 的右端」锁点本身就是 A 的尾巴，B 只整体后移而长度不变。
+- 同一思想贯穿其余编辑：`quantizeSelection`（锁点优先于网格）、`insertRest` / `deleteRest`（整段位移后重新贴齐、被删对象留下的悬空锁一并清掉）、`splitSelectedAt`（拆分只改长度：左段保留被锁身份、右段不继承锁，指向被拆对象的引用改指到**尾段**）。`link()` 增加成环保护（A 锁 B 时拒绝 B 再锁 A）。
+- 测试：`RestAndLockTest` 扩到 7 项（新增拖后一条、拖前一条、Shift+→ 调长度三种情形的长度与锁点断言），总计 54 项。
+
+### v1.8 播放中换计划不再“漏音”（静音偶发失效）
+
+现象：两条音轨、其中一条静音，从头播放，偶尔会有一瞬间听到静音轨的声音。
+
+根因（调度线程与 EDT 的竞态）：`dispatchDue` 一次性把 lookahead 窗口（~260ms）内的事件发给合成器，循环里**不复检计划身份**。当 EDT 在 `updatePlan()` 里换上新计划（静音 / 独奏 / 编辑 / seek 都会触发）并重新锚定时，调度线程手里还是**旧计划的 events 列表**，但 `anchorMicros` / `nextIndex` 已被改成新计划的基准，于是旧事件算出的 `dueUs` 变成负数 → 一批本该被静音掉的 note-on 被立刻发出去，听起来就是“静音失效了一瞬间”。
+
+修复：
+- `planEpoch`（volatile）：`play` / `updatePlan` / `seek` / `setLoopEnabled` 每次换计划或重锚定都 +1。
+- `dispatchDue` 开头记住 `epoch` 与 `p`，**每发一条前复检** `epoch != planEpoch || plan != p` → 立刻 `return`，旧批次作废；新批次由下一轮 20ms 唤醒用新计划继续。
+- `play()` 改为 `joinScheduler(stopSchedulerThread())`（原来只 interrupt 不等），并 `pendingNoteOns.clear()`，避免上一轮的残留批次在新一轮开始后继续投递。
+- `panic()` 里“取消已排队 note-on”改成 same-timestamp（原来是 `+1µs`，会跨一个采样块，反而能听见一下）。
+
+验证：`MuteLeakTest` 2 项 —— 用注入的 `SynthService.forTesting(Receiver)`（无音频设备、走 nanoTime 回退分支）把“批次投递中”这个瞬间用小门闩固定住，在批次中途 `updatePlan()` 静音，断言此后伴奏轨 note-on 数为 0（修前实测漏出 42 个），并断言未静音轨照常发声；另一项验证“静音后从头播放”全程无该轨音符。总计 56 项。
+
+### v1.9 空隙自动休止符（无声即休止，实体化）
+
+原本休止符只能是用户手工插入的对象；但「两条平行线之间没声音」本身就是休止符 —— 手工去补一段红线段既琐碎又容易漏，而且只标红不实体化等于没给休止符「同等地位」（选不中、锁不住）。现在改成**自动实体化**：
+
+- `domain/GapRests.of(Track)`：把音轨里**发声区间求并集**（休止符不发声，天然被并集跳过），并集内部的空洞就是空隙；只取「第一个音开始之后、最后一个音结束之前」（首尾不加），返回 `Span(pitch, startTick, endTick)`；落在哪一行取**结束于该空隙起点的那一条**的音高。
+- `Track.reconcileRests()`：把空隙变成真正的 `Note.rest` 对象。**已存在且与某段空隙重叠的休止符就地改写**（保留 id，所以锁定关系不会断），落在空隙之外的删掉，缺的补上。调用点：`MidiDocumentView.afterEdit()`（每次编辑 / 撤销 / 重做后）与 `commitMultiEdit()`（拍撤销快照之前，保证快照前后自洽）、以及拖拽过程中的 `applySelectionMove` / `applySelectionResize`。
+- 结果：休止符与平行线**完全同地位** —— 框选、单击选中、`Shift+←→` 调长度、力度、拆分、收尾锁定、右键菜单、撤销/重做、`.mid` 存盘（`mideditor:rest=`）全都适用；`PlaybackPlan` 仍然跳过它不发声。
+- 编辑语义（因为几何由空隙决定，操作必须落到「音」上）：
+  - **拖动 / 拉长休止符** = 把这段静音拉长或缩短：它后面的音整体平移（`restRippleStarts` 记录最初的起点，绝对位移，多次拖拽不累积误差），休止符自身几何交给 `reconcileRests` 重算。
+  - **删除休止符** = 把后面的音整体前移补齐，空隙消失，休止符自然也没了。
+  - **把后面那条音拖到贴上** → 空隙消失 → 休止符自动删除。
+  - 只有「选中的全是休止符」时走 ripple；混选（平行线 + 休止符）仍按普通平移处理，避免误伤。
+- 移除了手工「插入休止符」命令与「空隙休止符」显示开关：休止符不再需要手工插入，也不再有“只标红不可编辑”的第二套视觉。
+- 测试：`GapRestsTest` 7 项（空隙识别：普通空隙、首尾不越界、重叠与和弦、声部交错、手绘休止符仍属空隙、紧邻无缝、空音轨）+ `AutoRestTest` 6 项（打开文件即刻实体化、自动实体化、拖动推音、贴合即消失、删除补齐、撤销回滚）；`RestAndLockTest` 改为验证「空隙生成的休止符可选中、可锁定、不发声」。总计 69 项。
 
 ### v1.3 滚轮语义统一 + Windows 下「按过 Alt 后滚轮失效」修复
 

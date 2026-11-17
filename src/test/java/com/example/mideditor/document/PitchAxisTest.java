@@ -238,7 +238,7 @@ class PitchAxisTest {
                 view.addNoteAt(track, 0, 24);
                 view.addNoteAt(track, 480, 96);
             });
-            assertEquals(2, track.notes().size());
+            assertEquals(2, soundingCount(track));
 
             SwingUtilities.invokeAndWait(view::pitchFitToNotes);
             assertTrue(track.yRange().contains(24), "低音平行线应可见");
@@ -322,6 +322,10 @@ class PitchAxisTest {
 
     private static void wheel(PianoRollCanvas canvas, int modifiers, int rotation) {
         canvas.dispatchEvent(wheelEvent(canvas, modifiers, rotation));
+    }
+
+    private static long soundingCount(Track track) {
+        return track.notes().stream().filter(n -> !n.isRest()).count();
     }
 
     private static void cleanup(AppContext app, MainFrame frame) throws Exception {

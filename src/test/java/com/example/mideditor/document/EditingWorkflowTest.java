@@ -1,26 +1,32 @@
 package com.example.mideditor.document;
 
-import com.example.mideditor.app.AppContext;
-import com.example.mideditor.app.MainFrame;
-import com.example.mideditor.command.AppCommandIds;
-import com.example.mideditor.domain.Note;
-import com.example.mideditor.domain.Track;
-import org.junit.jupiter.api.Test;
-
-import javax.swing.SwingUtilities;
 import java.awt.GraphicsEnvironment;
 import java.util.List;
+
+import javax.swing.SwingUtilities;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import org.junit.jupiter.api.Test;
+
+import com.example.mideditor.app.AppContext;
+import com.example.mideditor.app.MainFrame;
+import com.example.mideditor.command.AppCommandIds;
+import com.example.mideditor.domain.Note;
+import com.example.mideditor.domain.Track;
 
 /** 平行线编辑工作流：添加 / 拆分 / 移动 / 长度 / 量化 / 力度 / 休止 / 剪贴板 / 撤销。 */
 class EditingWorkflowTest {
 
     private static void run(Runnable action) throws Exception {
         SwingUtilities.invokeAndWait(action);
+    }
+
+    /** 只数「发声的平行线」：音轨里还会有由空隙自动生成的休止符对象。 */
+    private static long sounding(Track track) {
+        return track.notes().stream().filter(n -> !n.isRest()).count();
     }
 
     @Test
@@ -40,7 +46,7 @@ class EditingWorkflowTest {
 
             // 添加平行线（默认长度 = 1/16 网格 = 120 ticks）
             run(() -> view.addNoteAt(track, 0, 60));
-            assertEquals(1, track.notes().size());
+            assertEquals(1, sounding(track));
             Note note = track.notes().get(0);
             assertEquals(120, note.durationTicks());
             assertEquals(100, note.velocity());
@@ -55,7 +61,7 @@ class EditingWorkflowTest {
                 view.setPendingSplit(240);
                 app.router().dispatch(AppCommandIds.NOTE_SPLIT);
             });
-            assertEquals(2, track.notes().size());
+            assertEquals(2, sounding(track));
             assertEquals(240, track.notes().get(0).endTick());
 
             // 批量移动（时间 + 音高）
@@ -90,9 +96,9 @@ class EditingWorkflowTest {
 
             // 删除 + 撤销
             run(() -> view.deleteSelection());
-            assertEquals(0, track.notes().size());
+            assertEquals(0, sounding(track));
             run(() -> app.router().dispatch(AppCommandIds.EDIT_UNDO));
-            assertEquals(2, track.notes().size());
+            assertEquals(2, sounding(track));
 
             // 休止：插入休止使后续平行线右移，删除休止复原
             long startBefore = track.notes().get(0).startTick();
@@ -108,14 +114,14 @@ class EditingWorkflowTest {
                 view.seekTick(1920);
                 view.paste();
             });
-            assertEquals(4, track.notes().size());
+            assertEquals(4, sounding(track));
 
             // 右键空白处添加（pending 坐标）
             run(() -> {
                 view.setPendingAdd(2400, 72);
                 app.router().dispatch(AppCommandIds.NOTE_ADD);
             });
-            assertEquals(5, track.notes().size());
+            assertEquals(5, sounding(track));
             assertTrue(track.notes().stream().anyMatch(n -> n.pitch() == 72 && n.startTick() == 2400));
 
             // 撤销全部后可回到初始状态
@@ -125,7 +131,7 @@ class EditingWorkflowTest {
                 }
                 view.afterEdit(true);
             });
-            assertEquals(0, track.notes().size());
+            assertEquals(0, sounding(track));
         } finally {
             run(() -> {
                 for (DocumentSession session : app.documents().sessions()) {

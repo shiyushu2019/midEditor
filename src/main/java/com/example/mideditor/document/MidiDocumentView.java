@@ -31,11 +31,18 @@ import com.example.mideditor.util.Log;
  */
 public final class MidiDocumentView extends DocumentView {
 
+    /** 拖拽时“贴上相邻平行线”的吸附半径（像素）。 */
+    private static final int EDGE_SNAP_PIXELS = 8;
+
     private final GridSettings grid = new GridSettings();
     private final PianoRollView pianoRoll;
     private final TransportBar transport;
     private final Timer uiTimer;
     private final Map<UUID, long[]> selectionOrigin = new HashMap<>();
+    /** 本大拖拽事务中「用户真正选中的」平行线（不含因收尾锁定被纳入的同伴）。 */
+    private final java.util.Set<UUID> primarySelection = new java.util.HashSet<>();
+    /** 拖拽休止符时，它所在音轨所有音的原始起点（用于把后面的音整体平移）。 */
+    private final Map<UUID, Long> restRippleStarts = new HashMap<>();
 
     private Track activeTrack;
     private long playheadTick;
@@ -69,6 +76,8 @@ public final class MidiDocumentView extends DocumentView {
         selection().addListener(this::onSelectionChanged);
         uiTimer = new Timer(16, e -> onUiTick());
         uiTimer.start();
+        // 打开 / 导入已存在的文件时，空隙也要立刻实体化成休止符（否则要等第一次编辑才刷出来）
+        reconcileRests(document.tracks());
         refresh();
     }
 
@@ -405,6 +414,8 @@ public final class MidiDocumentView extends DocumentView {
 
     public void afterEdit(boolean structural) {
         document().setDirty(true);
+        // 休止符 = 空隙：每次编辑后重新实体化，保证它和平行线一样可选/可拖/可锁/可存
+        reconcileRests(document().tracks());
         if (structural) {
             ensureActiveTrack();
             pianoRoll.refreshTrackStructure();
@@ -476,6 +487,129 @@ public final class MidiDocumentView extends DocumentView {
         pianoRoll.scrollToTick(startTick);
     }
 
+    // ---------------------------------------------------------------- 收尾锁定
+
+    /**
+     * 收尾锁定：选中多条时按时间顺序首尾相连；只选一条时与同轨后面最近的一条相连。
+     * 连上后下一条的头部会对齐到上一条的尾部，之后移动任意一条整组一起动。
+     */
+    public void lockSelection() {
+        List<Track> tracks = selection().tracksOf(document());
+        if (tracks.isEmpty()) {
+            return;
+        }
+        beginMultiEdit(tracks);
+        int linked = 0;
+        for (Track track : tracks) {
+            List<Note> picked = new ArrayList<>();
+            for (Note note : track.notes()) {
+                if (selection().contains(note)) {
+                    picked.add(note);
+                }
+            }
+            picked.sort(Track.BY_START);
+            if (picked.size() >= 2) {
+                for (int i = 1; i < picked.size(); i++) {
+                    if (link(track, picked.get(i - 1), picked.get(i))) {
+                        linked++;
+                    }
+                }
+            } else if (picked.size() == 1) {
+                Note leader = picked.get(0);
+                Note follower = nextAfter(track, leader);
+                if (follower != null && link(track, leader, follower)) {
+                    linked++;
+                }
+            }
+        }
+        if (linked == 0) {
+            cancelEditingSilently();
+            app().refreshApplicationState();
+            return;
+        }
+        commitMultiEdit("收尾锁定");
+        app().refreshApplicationState();
+    }
+
+    /** 解除选中平行线的收尾锁定（自己锁别人的、以及别人锁自己的都解开）。 */
+    public void unlockSelection() {
+        List<Track> tracks = selection().tracksOf(document());
+        if (tracks.isEmpty()) {
+            return;
+        }
+        beginMultiEdit(tracks);
+        java.util.Set<java.util.UUID> ids = new java.util.HashSet<>();
+        for (Note note : selection().resolve(document())) {
+            ids.add(note.id());
+        }
+        int removed = 0;
+        for (Track track : tracks) {
+            for (Note note : track.notes()) {
+                if (note.lockLeaderId() == null) {
+                    continue;
+                }
+                if (ids.contains(note.id()) || ids.contains(note.lockLeaderId())) {
+                    note.setLockLeaderId(null);
+                    removed++;
+                }
+            }
+        }
+        if (removed == 0) {
+            cancelEditingSilently();
+            return;
+        }
+        commitMultiEdit("解除锁定");
+        app().refreshApplicationState();
+    }
+
+    private boolean link(Track track, Note leader, Note follower) {
+        if (leader == follower || leader.id().equals(follower.lockLeaderId())) {
+            return false;
+        }
+        if (chainContains(track, leader, follower.id())) {
+            // 避免 A 锁 B 同时又 B 锁 A（成环会让整组移动 / 贴合变成死循环）
+            return false;
+        }
+        follower.setStartTick(leader.endTick());
+        follower.setLockLeaderId(leader.id());
+        track.sortNotes();
+        return true;
+    }
+
+    /** 沿 lockLeaderId 向上追，看链里有没有 targetId。 */
+    private boolean chainContains(Track track, Note start, java.util.UUID targetId) {
+        Note current = start;
+        for (int guard = 0; current != null && guard < 512; guard++) {
+            if (current.id().equals(targetId)) {
+                return true;
+            }
+            current = current.lockLeaderId() == null ? null : track.noteById(current.lockLeaderId());
+        }
+        return false;
+    }
+
+    /** 同轨中起点在 leader 之后（含贴合）且最靠前的一条。 */
+    private Note nextAfter(Track track, Note leader) {
+        Note best = null;
+        for (Note note : track.notes()) {
+            if (note == leader || selection().contains(note)) {
+                continue;
+            }
+            if (note.startTick() >= leader.endTick() - 1
+                    && (best == null || note.startTick() < best.startTick())) {
+                best = note;
+            }
+        }
+        return best;
+    }
+
+    /** 放弃当前多轨事务（不改任何东西）。 */
+    private void cancelEditingSilently() {
+        editTracks = null;
+        editSnapshots = null;
+        afterEdit(false);
+    }
+
     /** 新建平行线的默认长度：支持「跟随网格 / 固定拍值 / 1 小节 / 自定义 tick」。 */
     public long defaultNoteDuration() {
         if (grid.noteLength() == GridSettings.NoteLength.BAR) {
@@ -486,7 +620,7 @@ public final class MidiDocumentView extends DocumentView {
 
     /** 单击平行线试听：立即用该音轨的音色发一声，播放中不叠加。 */
     public void auditionNote(Track track, Note note) {
-        if (track == null || note == null || !app().synth().available()) {
+        if (track == null || note == null || note.isRest() || !app().synth().available()) {
             return;
         }
         PlaybackEngine engine = app().playback();
@@ -509,8 +643,42 @@ public final class MidiDocumentView extends DocumentView {
         }
         List<Note> selected = selection().resolve(document());
         beginMultiEdit(tracks);
+        // 选中休止符 = 想把这段静音填上：把后面的音整体往前提
+        List<Note> rests = new ArrayList<>();
+        for (Note note : selected) {
+            if (note.isRest()) {
+                rests.add(note);
+            }
+        }
+        rests.sort(Track.BY_START);
+        for (Track track : tracks) {
+            for (Note rest : rests) {
+                if (!track.notes().contains(rest)) {
+                    continue;
+                }
+                long from = rest.endTick();
+                long gap = rest.durationTicks();
+                for (Note note : track.notes()) {
+                    if (!note.isRest() && note.startTick() >= from) {
+                        note.setStartTick(Math.max(0, note.startTick() - gap));
+                    }
+                }
+                track.notes().remove(rest);
+                track.sortNotes();
+            }
+        }
         for (Track track : tracks) {
             track.notes().removeAll(selected);
+            // 删掉的前一条如果被锁定引用，就一并清掉，免得留下悬空指向
+            java.util.Set<java.util.UUID> gone = new java.util.HashSet<>();
+            for (Note note : selected) {
+                gone.add(note.id());
+            }
+            for (Note note : track.notes()) {
+                if (note.lockLeaderId() != null && gone.contains(note.lockLeaderId())) {
+                    note.setLockLeaderId(null);
+                }
+            }
         }
         selection().clear();
         commitMultiEdit("删除平行线");
@@ -527,6 +695,8 @@ public final class MidiDocumentView extends DocumentView {
         List<Note> created = new ArrayList<>();
         for (Track track : tracks) {
             List<Note> copies = new ArrayList<>(track.notes());
+            // 拆分只改长度、不改锁定关系：指向被拆对象的引用要挪到尾段上
+            Map<UUID, UUID> retarget = new LinkedHashMap<>();
             for (Note note : copies) {
                 if (!selection().contains(note)) {
                     continue;
@@ -542,10 +712,21 @@ public final class MidiDocumentView extends DocumentView {
                 Note right = note.copy();
                 right.setStartTick(splitTick);
                 right.setDurationTicks(end - splitTick);
+                // 尾段的“上一条”就是左段（只做位置关系，不额外扩散锁定）
+                right.setLockLeaderId(null);
                 track.addNote(left);
                 track.addNote(right);
                 created.add(left);
                 created.add(right);
+                retarget.put(note.id(), right.id());
+            }
+            if (!retarget.isEmpty()) {
+                for (Note note : track.notes()) {
+                    UUID leader = note.lockLeaderId();
+                    if (leader != null && retarget.containsKey(leader)) {
+                        note.setLockLeaderId(retarget.get(leader));
+                    }
+                }
             }
             track.sortNotes();
         }
@@ -559,9 +740,14 @@ public final class MidiDocumentView extends DocumentView {
         }
         List<Track> tracks = selection().tracksOf(document());
         beginMultiEdit(tracks);
+        if (rippleSelection(tracks, deltaTicks)) {
+            commitMultiEdit("移动休止符");
+            return;
+        }
         for (Track track : tracks) {
+            java.util.Set<java.util.UUID> moving = movingIds(track);
             for (Note note : track.notes()) {
-                if (!selection().contains(note)) {
+                if (!moving.contains(note.id())) {
                     continue;
                 }
                 note.setStartTick(Math.max(0, note.startTick() + deltaTicks));
@@ -574,12 +760,49 @@ public final class MidiDocumentView extends DocumentView {
         commitMultiEdit("移动平行线");
     }
 
+    /** 选中项 + 通过收尾锁定连在一起的整组（用于方向键 / 整组移动）。 */
+    private java.util.Set<java.util.UUID> movingIds(Track track) {
+        java.util.Set<java.util.UUID> ids = new java.util.HashSet<>();
+        for (Note note : track.notes()) {
+            if (selection().contains(note)) {
+                ids.add(note.id());
+            }
+        }
+        boolean added = true;
+        while (added) {
+            added = false;
+            for (Note note : track.notes()) {
+                if (ids.contains(note.id())) {
+                    continue;
+                }
+                boolean linked = note.lockLeaderId() != null && ids.contains(note.lockLeaderId());
+                if (!linked) {
+                    for (Note other : track.notes()) {
+                        if (ids.contains(other.id()) && note.id().equals(other.lockLeaderId())) {
+                            linked = true;
+                            break;
+                        }
+                    }
+                }
+                if (linked) {
+                    ids.add(note.id());
+                    added = true;
+                }
+            }
+        }
+        return ids;
+    }
+
     public void resizeSelection(long deltaTicks) {
         if (selection().isEmpty()) {
             return;
         }
         List<Track> tracks = selection().tracksOf(document());
         beginMultiEdit(tracks);
+        if (rippleSelection(tracks, deltaTicks)) {
+            commitMultiEdit("调整休止符长度");
+            return;
+        }
         for (Track track : tracks) {
             for (Note note : track.notes()) {
                 if (!selection().contains(note)) {
@@ -588,6 +811,8 @@ public final class MidiDocumentView extends DocumentView {
                 note.setDurationTicks(Math.max(1, note.durationTicks() + deltaTicks));
             }
         }
+        // 只改了被选中的长度，锁住的同伴靠“移位置”贴回来
+        reflowLocks(tracks);
         commitMultiEdit("调整平行线长度");
     }
 
@@ -640,6 +865,8 @@ public final class MidiDocumentView extends DocumentView {
             }
             track.sortNotes();
         }
+        // 量化只动被选中的；被锁住的关系靠移位置重新贴齐（锁点优先于网格）
+        reflowLocks(tracks);
         commitMultiEdit("量化平行线");
     }
 
@@ -655,6 +882,7 @@ public final class MidiDocumentView extends DocumentView {
                 }
             }
             track.sortNotes();
+            reflowLocks(List.of(track));
         });
     }
 
@@ -665,12 +893,23 @@ public final class MidiDocumentView extends DocumentView {
         }
         edit(track, "删除休止", () -> {
             track.notes().removeIf(note -> note.startTick() >= tick && note.endTick() <= tick + length);
+            // 被删掉的可能是别人的锁点，清掉悬空引用
+            java.util.Set<java.util.UUID> alive = new java.util.HashSet<>();
+            for (Note note : track.notes()) {
+                alive.add(note.id());
+            }
+            for (Note note : track.notes()) {
+                if (note.lockLeaderId() != null && !alive.contains(note.lockLeaderId())) {
+                    note.setLockLeaderId(null);
+                }
+            }
             for (Note note : track.notes()) {
                 if (note.startTick() >= tick + length) {
                     note.setStartTick(Math.max(0, note.startTick() - length));
                 }
             }
             track.sortNotes();
+            reflowLocks(List.of(track));
         });
     }
 
@@ -706,7 +945,8 @@ public final class MidiDocumentView extends DocumentView {
         List<Note> created = new ArrayList<>();
         edit(track, "粘贴平行线", () -> {
             for (NoteClipboard.Item item : app().clipboard().items()) {
-                Note note = new Note(item.pitch(), start + item.startOffset(), item.duration(), item.velocity());
+                Note note = new Note(item.pitch(), start + item.startOffset(), item.duration(), item.velocity(),
+                        item.rest());
                 track.addNote(note);
                 created.add(note);
             }
@@ -721,18 +961,200 @@ public final class MidiDocumentView extends DocumentView {
         List<Track> tracks = selection().tracksOf(document());
         beginMultiEdit(tracks);
         selectionOrigin.clear();
+        primarySelection.clear();
+        restRippleStarts.clear();
         for (Track track : tracks) {
             for (Note note : track.notes()) {
                 if (selection().contains(note)) {
-                    selectionOrigin.put(note.id(),
-                            new long[] { note.startTick(), note.pitch(), note.durationTicks() });
+                    primarySelection.add(note.id());
+                    recordSelectionOrigin(note);
+                }
+            }
+            // 收尾锁定：整条链一起动（否则锁住的关系会被拖开）
+            boolean added = true;
+            while (added) {
+                added = false;
+                for (Note note : track.notes()) {
+                    if (selectionOrigin.containsKey(note.id())) {
+                        continue;
+                    }
+                    if (linkedToMoving(track, note)) {
+                        recordSelectionOrigin(note);
+                        added = true;
+                    }
+                }
+            }
+        }
+        recordRestRipple();
+    }
+
+    private void recordSelectionOrigin(Note note) {
+        selectionOrigin.put(note.id(),
+                new long[] { note.startTick(), note.pitch(), note.durationTicks() });
+    }
+
+    /**
+     * 选中了休止符时，记下它所在音轨所有音的起点：
+     * 拖动/拉长休止符 = 把这段空隙后面的音整体挪开或挪近（自身位置由空隙决定）。
+     */
+    private void recordRestRipple() {
+        restRippleStarts.clear();
+        if (!onlyRestsSelected(primarySelection)) {
+            return;
+        }
+        for (Track track : document().tracks()) {
+            long from = Long.MAX_VALUE;
+            for (Note note : track.notes()) {
+                if (note.isRest() && primarySelection.contains(note.id())) {
+                    from = Math.min(from, note.endTick());
+                }
+            }
+            if (from == Long.MAX_VALUE) {
+                continue;
+            }
+            for (Note note : track.notes()) {
+                if (note.startTick() >= from) {
+                    restRippleStarts.put(note.id(), note.startTick());
                 }
             }
         }
     }
 
+    /** 按最初记录的位置整体平移“休止符之后的音”（绝对位移，多次拖拽不累积误差）。 */
+    private boolean applyRestRipple(long deltaTicks) {
+        if (restRippleStarts.isEmpty()) {
+            return false;
+        }
+        for (Track track : document().tracks()) {
+            boolean changed = false;
+            for (Note note : track.notes()) {
+                Long base = restRippleStarts.get(note.id());
+                if (base == null || (note.isRest() && primarySelection.contains(note.id()))) {
+                    continue;
+                }
+                long target = Math.max(0, base + deltaTicks);
+                if (note.startTick() != target) {
+                    note.setStartTick(target);
+                    changed = true;
+                }
+            }
+            if (changed) {
+                track.sortNotes();
+            }
+        }
+        reconcileRests(document().tracks());
+        return true;
+    }
+
+    /** 让「休止符 = 空隙」保持一致（实体化，参与选中/拖动/锁定/存盘），并让锁定关系重新贴齐。 */
+    private void reconcileRests(List<Track> tracks) {
+        if (tracks == null || tracks.isEmpty()) {
+            return;
+        }
+        List<Track> touched = new ArrayList<>();
+        for (Track track : tracks) {
+            if (track.reconcileRests()) {
+                touched.add(track);
+            }
+        }
+        if (!touched.isEmpty()) {
+            reflowLocks(touched);
+        }
+    }
+
+    /**
+     * 选中项里有休止符时，方向键移动 / Shift 调长度都按「拉长或缩短这段静音」处理：
+     * 把它后面的音整体平移，休止符自身的几何交给 reconcileRests 重算。
+     *
+     * @return true 表示这次操作走的是休止符分支
+     */
+    private boolean rippleSelection(List<Track> tracks, long deltaTicks) {
+        java.util.Set<UUID> ids = new java.util.HashSet<>();
+        for (Note note : selection().resolve(document())) {
+            ids.add(note.id());
+        }
+        if (!onlyRestsSelected(ids)) {
+            return false;
+        }
+        boolean hasRest = false;
+        long from = Long.MAX_VALUE;
+        for (Track track : tracks) {
+            for (Note note : track.notes()) {
+                if (note.isRest() && selection().contains(note)) {
+                    hasRest = true;
+                    from = Math.min(from, note.endTick());
+                }
+            }
+        }
+        if (!hasRest) {
+            return false;
+        }
+        for (Track track : tracks) {
+            boolean changed = false;
+            for (Note note : track.notes()) {
+                if (note.isRest() || note.startTick() < from) {
+                    continue;
+                }
+                note.setStartTick(Math.max(0, note.startTick() + deltaTicks));
+                changed = true;
+            }
+            if (changed) {
+                track.sortNotes();
+            }
+        }
+        reconcileRests(tracks);
+        return true;
+    }
+
+    /** 选中的全部是休止符（且不为空）时才算“在调空隙”，混选时按普通平行线处理。 */
+    private boolean onlyRestsSelected(java.util.Set<UUID> ids) {
+        boolean any = false;
+        for (Track track : document().tracks()) {
+            for (Note note : track.notes()) {
+                if (!ids.contains(note.id())) {
+                    continue;
+                }
+                if (!note.isRest()) {
+                    return false;
+                }
+                any = true;
+            }
+        }
+        return any;
+    }
+
+    /** 该平行线是否与正在移动的平行线有锁定关系（双向）。 */
+    private boolean linkedToMoving(Track track, Note note) {
+        if (note.lockLeaderId() != null && selectionOrigin.containsKey(note.lockLeaderId())) {
+            return true;
+        }
+        for (Note other : track.notes()) {
+            if (selectionOrigin.containsKey(other.id()) && note.id().equals(other.lockLeaderId())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public void applySelectionMove(long deltaTicks, int deltaPitch) {
         int ppq = document().ppq();
+        long adjustedDelta = deltaTicks;
+        // 纯上下拖动（只改音高）时不碰横坐标；横向拖动才做吸附
+        if (grid.snapEnabled() && deltaTicks != 0) {
+            // 用“第一个被拖动的平行线”当锚点算吸附量，整体平移，保持多选时的相对位置
+            long tolerance = edgeSnapTolerance(ppq);
+            Note anchor = firstMovingNote();
+            Track anchorTrack = anchor == null ? null : trackOfNote(anchor);
+            long[] origin = anchor == null ? null : selectionOrigin.get(anchor.id());
+            if (anchor != null && anchorTrack != null && origin != null) {
+                long target = origin[0] + deltaTicks;
+                long snapped = snapToNeighbour(anchorTrack, anchor, target, origin[2], tolerance, ppq);
+                adjustedDelta += snapped - target;
+            }
+        }
+        if (applyRestRipple(adjustedDelta)) {
+            return; // 拖的是休止符：后面那一段音跟着挪，几何由 reconcileRests 重新算
+        }
         for (Track track : document().tracks()) {
             boolean changed = false;
             for (Note note : track.notes()) {
@@ -740,10 +1162,7 @@ public final class MidiDocumentView extends DocumentView {
                 if (origin == null) {
                     continue;
                 }
-                long targetStart = origin[0] + deltaTicks;
-                if (grid.snapEnabled()) {
-                    targetStart = grid.snap(targetStart, ppq);
-                }
+                long targetStart = origin[0] + adjustedDelta;
                 note.setStartTick(Math.max(0, targetStart));
                 note.setPitch((int) Math.max(0, Math.min(127, origin[1] + deltaPitch)));
                 changed = true;
@@ -752,27 +1171,132 @@ public final class MidiDocumentView extends DocumentView {
                 track.sortNotes();
             }
         }
+        reconcileRests(document().tracks());
+    }
+
+    /** 拖拽吸附的距离阈值（按像素换算成 tick，缩放后手感一致）。 */
+    private long edgeSnapTolerance(int ppq) {
+        double pxPerQuarter = Math.max(1, pianoRoll.timeline().pxPerQuarter());
+        return Math.max(1, Math.round(EDGE_SNAP_PIXELS * ppq / pxPerQuarter));
+    }
+
+    private Note firstMovingNote() {
+        for (Track track : document().tracks()) {
+            for (Note note : track.notes()) {
+                if (selectionOrigin.containsKey(note.id())) {
+                    return note;
+                }
+            }
+        }
+        return null;
+    }
+
+    private Track trackOfNote(Note note) {
+        for (Track track : document().tracks()) {
+            if (track.notes().contains(note)) {
+                return track;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 移动吸附：先看能不能贴上同泳道里别的平行线的两端（接在上一条后面 / 让出下一条），
+     * 贴不上再退回网格吸附。
+     */
+    private long snapToNeighbour(Track track, Note moving, long targetStart, long duration,
+            long tolerance, int ppq) {
+        long length = Math.max(1, duration);
+        long best = Long.MIN_VALUE;
+        long bestDistance = tolerance + 1;
+        for (Note other : track.notes()) {
+            if (other == moving || selectionOrigin.containsKey(other.id())) {
+                continue;
+            }
+            // 自己的起点贴到别人的终点（紧接上一个平行线）
+            long startCandidate = other.endTick();
+            long distance = Math.abs(startCandidate - targetStart);
+            if (distance <= tolerance && distance < bestDistance) {
+                bestDistance = distance;
+                best = startCandidate;
+            }
+            // 自己的终点贴到别人的起点（正好接上下一个平行线）
+            long endCandidate = other.startTick() - length;
+            distance = Math.abs(endCandidate - targetStart);
+            if (distance <= tolerance && distance < bestDistance) {
+                bestDistance = distance;
+                best = endCandidate;
+            }
+        }
+        if (best != Long.MIN_VALUE) {
+            return Math.max(0, best);
+        }
+        return grid.snap(targetStart, ppq);
     }
 
     public void applySelectionResize(long deltaTicks) {
+        if (applyRestRipple(deltaTicks)) {
+            return; // 拉的是休止符：等于拉长/缩短这段静音，后面的音被推开/拉回
+        }
+        List<Track> touched = new ArrayList<>();
         for (Track track : document().tracks()) {
+            boolean changed = false;
             for (Note note : track.notes()) {
                 long[] origin = selectionOrigin.get(note.id());
-                if (origin == null) {
+                // 只有用户真正选中的才改长度：锁住的同伴不许“跟着变长/变短”
+                if (origin == null || !primarySelection.contains(note.id())) {
                     continue;
                 }
                 note.setDurationTicks(Math.max(1, origin[2] + deltaTicks));
+                changed = true;
+            }
+            if (changed) {
+                touched.add(track);
+            }
+        }
+        // 长度变了之后，锁定关系只靠“移动”对齐（锁点跟着上一条的尾巴走），不改对方长度
+        reflowLocks(touched);
+    }
+
+    /**
+     * 让收尾锁定重新贴齐：后一条的头部 = 前一条的尾巴（只移位置、不改长度），沿着链一直传下去。
+     */
+    private void reflowLocks(List<Track> tracks) {
+        for (Track track : tracks) {
+            int guard = 0;
+            boolean changed = true;
+            while (changed && guard++ < 512) {
+                changed = false;
+                List<Note> snapshot = new ArrayList<>(track.notes());
+                for (Note note : snapshot) {
+                    if (note.lockLeaderId() == null) {
+                        continue;
+                    }
+                    Note leader = track.noteById(note.lockLeaderId());
+                    if (leader == null || note.startTick() == leader.endTick()) {
+                        continue;
+                    }
+                    note.setStartTick(leader.endTick());
+                    changed = true;
+                }
+                if (changed) {
+                    track.sortNotes();
+                }
             }
         }
     }
 
     public void commitSelectionEdit(String label) {
         selectionOrigin.clear();
+        primarySelection.clear();
+        restRippleStarts.clear();
         commitMultiEdit(label);
     }
 
     public void cancelSelectionEdit() {
         selectionOrigin.clear();
+        primarySelection.clear();
+        restRippleStarts.clear();
         if (editTracks != null && editSnapshots != null) {
             for (Track track : editTracks) {
                 List<Note> before = editSnapshots.get(track.id());
@@ -798,6 +1322,8 @@ public final class MidiDocumentView extends DocumentView {
         if (editTracks == null || editSnapshots == null) {
             return;
         }
+        // 先把休止符同步成实际空隙，让撤销/重做拍到的快照前后一致
+        reconcileRests(editTracks);
         CompositeEdit composite = new CompositeEdit(label);
         for (Track track : editTracks) {
             List<Note> before = editSnapshots.get(track.id());
@@ -823,7 +1349,8 @@ public final class MidiDocumentView extends DocumentView {
             Note y = b.get(i);
             if (!x.id().equals(y.id()) || x.pitch() != y.pitch()
                     || x.startTick() != y.startTick() || x.durationTicks() != y.durationTicks()
-                    || x.velocity() != y.velocity()) {
+                    || x.velocity() != y.velocity() || x.isRest() != y.isRest()
+                    || !java.util.Objects.equals(x.lockLeaderId(), y.lockLeaderId())) {
                 return false;
             }
         }

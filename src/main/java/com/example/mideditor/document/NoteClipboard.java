@@ -9,7 +9,7 @@ import com.example.mideditor.domain.Note;
 /** 应用级剪贴板：保存「平行线」相对时间偏移。 */
 public final class NoteClipboard {
 
-    public record Item(long startOffset, int pitch, long duration, int velocity) {
+    public record Item(long startOffset, int pitch, long duration, int velocity, boolean rest) {
     }
 
     private List<Item> items = List.of();
@@ -25,7 +25,8 @@ public final class NoteClipboard {
         }
         List<Item> copy = new ArrayList<>();
         for (Note note : notes) {
-            copy.add(new Item(note.startTick() - min, note.pitch(), note.durationTicks(), note.velocity()));
+            copy.add(new Item(note.startTick() - min, note.pitch(), note.durationTicks(), note.velocity(),
+                    note.isRest()));
         }
         copy.sort(Comparator.comparingLong(Item::startOffset).thenComparingInt(Item::pitch));
         items = List.copyOf(copy);

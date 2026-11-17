@@ -201,6 +201,76 @@ public final class Track {
     }
 
     /**
+     * 把「空隙」实体化成休止符：无声的时间段就是休止符，和平行线同地位（可选、可拖、可锁、可存盘）。
+     *
+     * <p>
+     * 已经存在且与某段空隙重叠的休止符会被**就地改写**（保留 id，所以锁定关系不会断），
+     * 落在空隙之外的休止符会被删掉，剩下的空隙补上新的休止符。
+     * </p>
+     *
+     * @return 是否改变了音符列表
+     */
+    public boolean reconcileRests() {
+        java.util.List<GapRests.Span> gaps = GapRests.of(this);
+        List<Note> rests = new ArrayList<>();
+        for (Note note : notes) {
+            if (note.isRest()) {
+                rests.add(note);
+            }
+        }
+        if (gaps.isEmpty() && rests.isEmpty()) {
+            return false;
+        }
+        boolean changed = false;
+        boolean[] claimed = new boolean[gaps.size()];
+        List<Note> obsolete = new ArrayList<>();
+        rests.sort(BY_START);
+        for (Note rest : rests) {
+            int best = -1;
+            long bestOverlap = 0;
+            for (int i = 0; i < gaps.size(); i++) {
+                if (claimed[i]) {
+                    continue;
+                }
+                GapRests.Span gap = gaps.get(i);
+                long overlap = Math.min(rest.endTick(), gap.endTick())
+                        - Math.max(rest.startTick(), gap.startTick());
+                if (overlap > bestOverlap) {
+                    bestOverlap = overlap;
+                    best = i;
+                }
+            }
+            if (best < 0) {
+                obsolete.add(rest); // 这段已经不是空隙了
+                changed = true;
+                continue;
+            }
+            claimed[best] = true;
+            GapRests.Span gap = gaps.get(best);
+            if (rest.pitch() != gap.pitch() || rest.startTick() != gap.startTick()
+                    || rest.durationTicks() != Math.max(1, gap.lengthTicks())) {
+                rest.setPitch(gap.pitch());
+                rest.setStartTick(gap.startTick());
+                rest.setDurationTicks(Math.max(1, gap.lengthTicks()));
+                changed = true;
+            }
+        }
+        notes.removeAll(obsolete);
+        for (int i = 0; i < gaps.size(); i++) {
+            if (claimed[i]) {
+                continue;
+            }
+            GapRests.Span gap = gaps.get(i);
+            notes.add(Note.rest(gap.pitch(), gap.startTick(), Math.max(1, gap.lengthTicks())));
+            changed = true;
+        }
+        if (changed) {
+            sortNotes();
+        }
+        return changed;
+    }
+
+    /**
      * 根据已有平行线自动定位可见音域（导入 / 新建 / 「音域适配」后调用）。
      * 音域跨度超过默认行数时会自动放大窗口，保证所有平行线都可见。
      */
