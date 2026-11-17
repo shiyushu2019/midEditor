@@ -1,0 +1,15 @@
+# 默认按文本处理，入库统一为 LF
+* text=auto
+
+# Maven Wrapper 的 shell 脚本必须是 LF，否则在 Git Bash / WSL 下无法执行
+mvnw        text eol=lf
+mvnwDebug   text eol=lf
+*.sh        text eol=lf
+
+# Windows 批处理必须是 CRLF
+*.cmd       text eol=crlf
+*.bat       text eol=crlf
+
+# 二进制文件不做换行符转换
+*.jar       binary
+*.zip       binary
