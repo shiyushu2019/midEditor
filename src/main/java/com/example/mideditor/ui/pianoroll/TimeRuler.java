@@ -219,12 +219,12 @@ public final class TimeRuler extends JComponent {
                 }
             }
 
-            // ---- 播放头
+            // ---- 播放头（画布里的播放头只有竖线，顶端的「向下三角」由标尺负责）
             int playheadX = timeline.xAtTick(host.playheadTick(), ppq);
             g2.setColor(Theme.PLAYHEAD);
             g2.drawLine(playheadX, LOOP_STRIP_HEIGHT, playheadX, height - 1);
-            int[] xs = { playheadX - 4, playheadX + 4, playheadX };
-            int[] ys = { LOOP_STRIP_HEIGHT, LOOP_STRIP_HEIGHT, LOOP_STRIP_HEIGHT + 6 };
+            int[] xs = { playheadX - 5, playheadX + 5, playheadX };
+            int[] ys = { LOOP_STRIP_HEIGHT, LOOP_STRIP_HEIGHT, LOOP_STRIP_HEIGHT + 7 };
             g2.fillPolygon(xs, ys, 3);
 
             g2.setColor(Theme.BORDER);

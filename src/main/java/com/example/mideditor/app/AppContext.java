@@ -1,5 +1,12 @@
 package com.example.mideditor.app;
 
+import java.awt.KeyboardFocusManager;
+import java.util.ArrayList;
+import java.util.List;
+
+import javax.swing.JComponent;
+import javax.swing.SwingUtilities;
+
 import com.example.mideditor.command.AppCommandIds;
 import com.example.mideditor.command.CommandContext;
 import com.example.mideditor.command.CommandInstaller;
@@ -15,11 +22,6 @@ import com.example.mideditor.engine.SynthService;
 import com.example.mideditor.ui.dock.DockManager;
 import com.example.mideditor.util.Log;
 
-import javax.swing.JComponent;
-import javax.swing.SwingUtilities;
-import java.util.ArrayList;
-import java.util.List;
-
 /** 组合根：集中持有应用级服务，避免全局静态状态。 */
 public final class AppContext {
 
@@ -33,6 +35,7 @@ public final class AppContext {
     private CommandRouter router;
     private MainFrame mainFrame;
     private DockManager dock;
+    private ArrowKeyDispatcher arrowKeys;
     private boolean refreshing;
 
     public void initialize(JComponent keyTarget) {
@@ -41,6 +44,9 @@ public final class AppContext {
         registry.setRouter(router);
         router.setContextSupplier(this::currentContext);
         CommandInstaller.install(this);
+        // 方向键兜底：焦点不在卷帘上时，Swing 的键绑定会完全失效，这里直接接管
+        arrowKeys = new ArrowKeyDispatcher(this);
+        KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(arrowKeys);
         documents.addChangeListener(this::refreshApplicationState);
         playback.addListener(engine -> {
             refreshApplicationState();
@@ -160,6 +166,10 @@ public final class AppContext {
     }
 
     public void shutdown() {
+        if (arrowKeys != null) {
+            KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(arrowKeys);
+            arrowKeys = null;
+        }
         playback.stop();
         // SynthService 是 AutoCloseable，用 try-with-resources 保证释放
         try (SynthService audio = synth) {

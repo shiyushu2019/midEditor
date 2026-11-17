@@ -165,15 +165,58 @@ final class EditCommands {
                 ctx -> ctx.document().resizeSelection(-gridStep(ctx.document())),
                 CommandContext::hasSelection, null));
 
-        // 备用键位：保留旧的 Alt+方向键习惯，并补 Shift+左右键调长度
+        // Ctrl+←/→：只动选区的外边界（内侧接缝不动，相邻的几条当成一个整体）
+        registry.register(new AppCommand(AppCommandIds.NOTE_EXTEND_RIGHT, "右端延长", CommandScope.SELECTION,
+                FileCommands.key(KeyEvent.VK_RIGHT, InputEvent.CTRL_DOWN_MASK),
+                ctx -> {
+                    if (TextFocusGuard.isTextEditing()) {
+                        return;
+                    }
+                    ctx.document().extendSelectionEdge(true);
+                },
+                CommandContext::hasSelection, null));
+
+        registry.register(new AppCommand(AppCommandIds.NOTE_EXTEND_LEFT, "左端延长", CommandScope.SELECTION,
+                FileCommands.key(KeyEvent.VK_LEFT, InputEvent.CTRL_DOWN_MASK),
+                ctx -> {
+                    if (TextFocusGuard.isTextEditing()) {
+                        return;
+                    }
+                    ctx.document().extendSelectionEdge(false);
+                },
+                CommandContext::hasSelection, null));
+
+        // Shift+→：左端向右收；Shift+←：右端向左收（都是“缩短”，与 Ctrl 的外扩配对）
+        registry.register(new AppCommand(AppCommandIds.NOTE_TRIM_LEFT, "左端右移（缩短）", CommandScope.SELECTION,
+                FileCommands.key(KeyEvent.VK_RIGHT, InputEvent.SHIFT_DOWN_MASK),
+                ctx -> {
+                    if (TextFocusGuard.isTextEditing()) {
+                        return;
+                    }
+                    ctx.document().shrinkSelectionEdge(true);
+                },
+                CommandContext::hasSelection, null));
+
+        registry.register(new AppCommand(AppCommandIds.NOTE_TRIM_RIGHT, "右端左移（缩短）", CommandScope.SELECTION,
+                FileCommands.key(KeyEvent.VK_LEFT, InputEvent.SHIFT_DOWN_MASK),
+                ctx -> {
+                    if (TextFocusGuard.isTextEditing()) {
+                        return;
+                    }
+                    ctx.document().shrinkSelectionEdge(false);
+                },
+                CommandContext::hasSelection, null));
+
+        // 备用键位：保留旧的 Alt+方向键（平移/改音高）
         registry.bindAlias(AppCommandIds.NOTE_MOVE_UP, FileCommands.key(KeyEvent.VK_UP, InputEvent.ALT_DOWN_MASK));
         registry.bindAlias(AppCommandIds.NOTE_MOVE_DOWN, FileCommands.key(KeyEvent.VK_DOWN, InputEvent.ALT_DOWN_MASK));
         registry.bindAlias(AppCommandIds.NOTE_MOVE_LEFT, FileCommands.key(KeyEvent.VK_LEFT, InputEvent.ALT_DOWN_MASK));
         registry.bindAlias(AppCommandIds.NOTE_MOVE_RIGHT,
                 FileCommands.key(KeyEvent.VK_RIGHT, InputEvent.ALT_DOWN_MASK));
-        registry.bindAlias(AppCommandIds.NOTE_LENGTHEN,
-                FileCommands.key(KeyEvent.VK_RIGHT, InputEvent.SHIFT_DOWN_MASK));
-        registry.bindAlias(AppCommandIds.NOTE_SHORTEN, FileCommands.key(KeyEvent.VK_LEFT, InputEvent.SHIFT_DOWN_MASK));
+        // 方向键语义（最终版）：
+        // Ctrl+→ 右端向右（左端不动） Ctrl+← 左端向左（右端不动） —— 外扩
+        // Shift+→ 左端向右（右端不动） Shift+← 右端向左（左端不动） —— 内收
+        // 裸方向键留给平移/改音高，Alt 变体只是兼容旧习惯。
 
         registry.register(new AppCommand(AppCommandIds.REST_INSERT, "插入休止", CommandScope.TRACK,
                 null,

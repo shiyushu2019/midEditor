@@ -260,11 +260,11 @@ final class PianoRollPainter {
         if (x < clip.x - 8 || x > clip.x + clip.width + 8) {
             return;
         }
+        // 画布里只画竖线。顶端的「向下三角」由顶部标尺（TimeRuler，作为列头不参与垂直滚动）负责。
+        // 原因：画布里任何贴着视口边界画的装饰都扛不住垂直滚动 —— Swing 滚屏是「位块拷贝 + 只补新露出的
+        // 一条带」，旧箭头像素会被连同内容一起搬走，于是屏上留下一串旧箭头（向上翻时尤其明显）。
         g.setColor(Theme.PLAYHEAD);
         g.drawLine(x, clip.y, x, clip.y + clip.height);
-        int[] xs = { x - 5, x + 5, x };
-        int[] ys = { clip.y, clip.y, clip.y + 7 };
-        g.fillPolygon(xs, ys, 3);
     }
 
     private static void paintLoopRegion(Graphics2D g, PianoRollView view, MidiDocumentView host, Rectangle clip) {

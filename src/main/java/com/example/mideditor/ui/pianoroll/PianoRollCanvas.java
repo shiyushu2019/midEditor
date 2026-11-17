@@ -65,11 +65,19 @@ public final class PianoRollCanvas extends JComponent {
         registry.bindLocal(this,
                 javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_RIGHT,
                         java.awt.event.InputEvent.SHIFT_DOWN_MASK),
-                AppCommandIds.NOTE_LENGTHEN);
+                AppCommandIds.NOTE_TRIM_LEFT);
         registry.bindLocal(this,
                 javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_LEFT,
                         java.awt.event.InputEvent.SHIFT_DOWN_MASK),
-                AppCommandIds.NOTE_SHORTEN);
+                AppCommandIds.NOTE_TRIM_RIGHT);
+        registry.bindLocal(this,
+                javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_RIGHT,
+                        java.awt.event.InputEvent.CTRL_DOWN_MASK),
+                AppCommandIds.NOTE_EXTEND_RIGHT);
+        registry.bindLocal(this,
+                javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_LEFT,
+                        java.awt.event.InputEvent.CTRL_DOWN_MASK),
+                AppCommandIds.NOTE_EXTEND_LEFT);
     }
 
     public PianoRollView view() {

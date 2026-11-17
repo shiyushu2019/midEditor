@@ -119,6 +119,8 @@ public final class MenuBarBuilder {
         item(lines, AppCommandIds.NOTE_MOVE_DOWN, "下移半音");
         item(lines, AppCommandIds.NOTE_MOVE_LEFT, "左移网格");
         item(lines, AppCommandIds.NOTE_MOVE_RIGHT, "右移网格");
+        item(lines, AppCommandIds.NOTE_EXTEND_LEFT, "左端延长一格（Ctrl+←）");
+        item(lines, AppCommandIds.NOTE_EXTEND_RIGHT, "右端延长一格（Ctrl+→）");
         lines.addSeparator();
         item(lines, AppCommandIds.NOTE_LENGTHEN, "拉长平行线");
         item(lines, AppCommandIds.NOTE_SHORTEN, "缩短平行线");

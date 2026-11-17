@@ -37,6 +37,14 @@ public final class AppCommandIds {
     public static final String NOTE_MOVE_RIGHT = "note.moveRight";
     public static final String NOTE_LENGTHEN = "note.lengthen";
     public static final String NOTE_SHORTEN = "note.shorten";
+    /** Ctrl+→：左端不动，右端往外延长一格（多条选中时按整体只动最外侧）。 */
+    public static final String NOTE_EXTEND_RIGHT = "note.extendRight";
+    /** Ctrl+←：右端不动，左端往外延长一格（多条选中时按整体只动最外侧）。 */
+    public static final String NOTE_EXTEND_LEFT = "note.extendLeft";
+    /** Shift+→：右端不动，左端向右收一格（缩短）。 */
+    public static final String NOTE_TRIM_LEFT = "note.trimLeft";
+    /** Shift+←：左端不动，右端向左收一格（缩短）。 */
+    public static final String NOTE_TRIM_RIGHT = "note.trimRight";
     public static final String REST_INSERT = "rest.insert";
     public static final String REST_DELETE = "rest.delete";
 

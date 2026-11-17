@@ -33,6 +33,8 @@ public final class MidiDocumentView extends DocumentView {
 
     /** 拖拽时“贴上相邻平行线”的吸附半径（像素）。 */
     private static final int EDGE_SNAP_PIXELS = 8;
+    /** 休止符实体化与锁定贴齐的收敛轮数上限（正常 1~2 轮就稳定，上限只防病态数据）。 */
+    private static final int MAX_SETTLE_ROUNDS = 4;
 
     private final GridSettings grid = new GridSettings();
     private final PianoRollView pianoRoll;
@@ -388,6 +390,8 @@ public final class MidiDocumentView extends DocumentView {
     public void onActivated() {
         pianoRoll.repaint();
         transport.refresh();
+        // 切换文档后把键盘焦点交给卷帘，方向键 / Ctrl+←→ 才能立刻用（否则焦点可能停在别的控件上）
+        javax.swing.SwingUtilities.invokeLater(this::requestFocusCanvas);
     }
 
     @Override
@@ -603,11 +607,11 @@ public final class MidiDocumentView extends DocumentView {
         return best;
     }
 
-    /** 放弃当前多轨事务（不改任何东西）。 */
+    /** 放弃当前多轨事务（不改任何东西，也不把文档标脏）。 */
     private void cancelEditingSilently() {
         editTracks = null;
         editSnapshots = null;
-        afterEdit(false);
+        pianoRoll.repaint();
     }
 
     /** 新建平行线的默认长度：支持「跟随网格 / 固定拍值 / 1 小节 / 自定义 tick」。 */
@@ -1046,19 +1050,27 @@ public final class MidiDocumentView extends DocumentView {
         return true;
     }
 
-    /** 让「休止符 = 空隙」保持一致（实体化，参与选中/拖动/锁定/存盘），并让锁定关系重新贴齐。 */
+    /**
+     * 让「休止符 = 空隙」保持一致（实体化，参与选中/拖动/锁定/存盘），并让收尾锁定重新贴齐。
+     *
+     * <p>
+     * 两件事互相影响：贴齐锁定会移动音符（空隙随之改变），而休止符的几何又完全由空隙推导，
+     * 所以要反复做到「这一轮什么都没改」为止。
+     * </p>
+     */
     private void reconcileRests(List<Track> tracks) {
         if (tracks == null || tracks.isEmpty()) {
             return;
         }
-        List<Track> touched = new ArrayList<>();
-        for (Track track : tracks) {
-            if (track.reconcileRests()) {
-                touched.add(track);
+        for (int round = 0; round < MAX_SETTLE_ROUNDS; round++) {
+            boolean changed = false;
+            for (Track track : tracks) {
+                changed |= track.reconcileRests();
             }
-        }
-        if (!touched.isEmpty()) {
-            reflowLocks(touched);
+            changed |= reflowLocks(tracks);
+            if (!changed) {
+                break;
+            }
         }
     }
 
@@ -1121,6 +1133,270 @@ public final class MidiDocumentView extends DocumentView {
             }
         }
         return any;
+    }
+
+    // ----------------------------------------------------------------
+    // 外边界延长（Ctrl+←/→）
+
+    /** Ctrl+←/→ 用的步长（与方向键移动、Shift 调长度一致）。 */
+    private long gridStepTicks() {
+        long step = grid.step(document().ppq());
+        return step > 0 ? step : Math.max(1, document().ppq() / 4);
+    }
+
+    /**
+     * Ctrl+→ / Ctrl+←：只把选区「外边界」往外延长一格，内侧接缝不动。
+     *
+     * <ul>
+     * <li>多条选中时逐组执行；</li>
+     * <li>首尾相接 / 重叠的几条算一组，当成整体处理：只动最外侧那一条的外边界，
+     * 不会出现「前一条的尾巴插进后一条里面」；</li>
+     * <li>延长到相邻的未选中平行线就停住，不制造重叠；</li>
+     * <li>往左延长时，若最外侧那条的头部被收尾锁定钉在别人尾巴上（它是跟随者），整组跳过；</li>
+     * <li>跟随者会随锁点一起平移（由收尾锁定负责），所以锁住的相邻对也能正确整体伸长；</li>
+     * <li>选中项全是休止符时，按「这段静音变长 / 变短」处理（后面的音整体平移）。</li>
+     * </ul>
+     */
+    public void extendSelectionEdge(boolean rightward) {
+        if (selection().isEmpty()) {
+            return;
+        }
+        List<Track> tracks = selection().tracksOf(document());
+        if (tracks.isEmpty()) {
+            return;
+        }
+        long step = gridStepTicks();
+        if (rippleSelection(tracks, rightward ? step : -step)) {
+            return; // 选的是休止符：等价于调整这段空隙的长度
+        }
+        beginMultiEdit(tracks);
+        boolean changed = false;
+        for (Track track : tracks) {
+            List<Note> picked = new ArrayList<>();
+            for (Note note : track.notes()) {
+                if (selection().contains(note)) {
+                    picked.add(note);
+                }
+            }
+            picked.sort(Track.BY_START);
+            for (List<Note> cluster : clusters(picked)) {
+                changed |= rightward ? extendClusterRight(track, cluster, step)
+                        : extendClusterLeft(track, cluster, step);
+            }
+        }
+        if (!changed) {
+            // 没地方可延（紧邻其它平行线 / 已到 0）：不产生编辑、不弄脏文档，但要给用户一个提示，
+            // 否则按键看起来像“完全没反应”
+            cancelEditingSilently();
+            if (app().mainFrame() != null) {
+                app().mainFrame().statusBar().setMessage(rightward
+                        ? "无法向右延长：右侧已紧邻其它平行线"
+                        : "无法向左延长：左侧已紧邻其它平行线或已到 0");
+            }
+            return;
+        }
+        commitMultiEdit(rightward ? "右端延长" : "左端延长");
+        app().refreshApplicationState();
+    }
+
+    /** 把「首尾相接 / 重叠」的选中项分成若干组（无空隙即同组）。 */
+    private static List<List<Note>> clusters(List<Note> sortedByStart) {
+        List<List<Note>> groups = new ArrayList<>();
+        List<Note> current = new ArrayList<>();
+        long covered = Long.MIN_VALUE;
+        for (Note note : sortedByStart) {
+            if (!current.isEmpty() && note.startTick() > covered) {
+                groups.add(current);
+                current = new ArrayList<>();
+                covered = Long.MIN_VALUE;
+            }
+            current.add(note);
+            covered = Math.max(covered, note.endTick());
+        }
+        if (!current.isEmpty()) {
+            groups.add(current);
+        }
+        return groups;
+    }
+
+    private boolean extendClusterRight(Track track, List<Note> cluster, long step) {
+        Note last = cluster.get(0);
+        for (Note note : cluster) {
+            if (note.endTick() > last.endTick()) {
+                last = note;
+            }
+        }
+        if (last.isRest()) {
+            return false; // 休止符的几何由空隙推导，单独拉它没有意义
+        }
+        long limit = nextUnselectedStart(track, last, cluster);
+        long target = Math.min(last.endTick() + step, limit);
+        long delta = target - last.endTick();
+        if (delta <= 0) {
+            return false;
+        }
+        last.setDurationTicks(last.durationTicks() + delta);
+        track.sortNotes();
+        return true;
+    }
+
+    private boolean extendClusterLeft(Track track, List<Note> cluster, long step) {
+        Note first = cluster.get(0);
+        for (Note note : cluster) {
+            if (note.startTick() < first.startTick()) {
+                first = note;
+            }
+        }
+        // 休止符由空隙决定；跟随者的头部被锁点钉住，自己左移会被贴齐逻辑撤销
+        if (first.isRest() || first.lockLeaderId() != null) {
+            return false;
+        }
+        long limit = previousUnselectedEnd(track, first, cluster);
+        long target = Math.max(0, Math.max(limit, first.startTick() - step));
+        long delta = first.startTick() - target;
+        if (delta <= 0) {
+            return false;
+        }
+        first.setStartTick(target);
+        first.setDurationTicks(first.durationTicks() + delta);
+        track.sortNotes();
+        return true;
+    }
+
+    /**
+     * Shift+→ / Shift+←：把选区「外边界」往里收一格（缩短），内侧接缝不动。
+     *
+     * <ul>
+     * <li>Shift+→：左端向右收（右端不动）；Shift+←：右端向左收（左端不动）。</li>
+     * <li>多条选中时按组处理，只动最外侧那一条；最短保留 1 tick。</li>
+     * <li>左端要被锁点钉住时（它是跟随者）跳过；休止符跳过（几何由空隙推导）。</li>
+     * </ul>
+     */
+    public void shrinkSelectionEdge(boolean fromLeft) {
+        if (selection().isEmpty()) {
+            return;
+        }
+        List<Track> tracks = selection().tracksOf(document());
+        if (tracks.isEmpty()) {
+            return;
+        }
+        long step = gridStepTicks();
+        if (rippleSelection(tracks, fromLeft ? step : -step)) {
+            return; // 选的是休止符：等价于把这段静音缩短
+        }
+        beginMultiEdit(tracks);
+        boolean changed = false;
+        for (Track track : tracks) {
+            List<Note> picked = new ArrayList<>();
+            for (Note note : track.notes()) {
+                if (selection().contains(note)) {
+                    picked.add(note);
+                }
+            }
+            picked.sort(Track.BY_START);
+            for (List<Note> cluster : clusters(picked)) {
+                changed |= fromLeft ? shrinkClusterFromLeft(track, cluster, step)
+                        : shrinkClusterFromRight(track, cluster, step);
+            }
+        }
+        if (!changed) {
+            cancelEditingSilently();
+            if (app().mainFrame() != null) {
+                app().mainFrame().statusBar().setMessage("无法再缩短：已经只剩一格");
+            }
+            return;
+        }
+        commitMultiEdit(fromLeft ? "左端右移" : "右端左移");
+        app().refreshApplicationState();
+    }
+
+    private boolean shrinkClusterFromLeft(Track track, List<Note> cluster, long step) {
+        Note first = cluster.get(0);
+        for (Note note : cluster) {
+            if (note.startTick() < first.startTick()) {
+                first = note;
+            }
+        }
+        // 跟随者的头被锁点钉住，不能自己右移
+        if (first.isRest() || first.lockLeaderId() != null) {
+            return false;
+        }
+        long target = Math.min(first.endTick() - 1, first.startTick() + step);
+        long delta = target - first.startTick();
+        if (delta <= 0) {
+            return false;
+        }
+        first.setStartTick(target);
+        first.setDurationTicks(first.durationTicks() - delta);
+        track.sortNotes();
+        return true;
+    }
+
+    private boolean shrinkClusterFromRight(Track track, List<Note> cluster, long step) {
+        Note last = cluster.get(0);
+        for (Note note : cluster) {
+            if (note.endTick() > last.endTick()) {
+                last = note;
+            }
+        }
+        if (last.isRest()) {
+            return false;
+        }
+        long target = Math.max(last.startTick() + 1, last.endTick() - step);
+        long delta = last.endTick() - target;
+        if (delta <= 0) {
+            return false;
+        }
+        last.setDurationTicks(last.durationTicks() - delta);
+        track.sortNotes();
+        return true;
+    }
+
+    /**
+     * 右侧最近一条「不该挡住我们」的平行线起点，用作右延上限。
+     * 跟着我们走的锁定跟随者（它锁在本组某条上）不挡路。
+     */
+    private long nextUnselectedStart(Track track, Note from, List<Note> cluster) {
+        long best = Long.MAX_VALUE;
+        for (Note note : track.notes()) {
+            // 休止符是派生的几何，不算障碍（延长后它会重新计算）
+            if (note.isRest() || cluster.contains(note) || note.startTick() < from.endTick()) {
+                continue;
+            }
+            if (followsCluster(note, cluster)) {
+                continue; // 锁在我们尾巴上的跟随者会一起右移
+            }
+            best = Math.min(best, note.startTick());
+        }
+        return best;
+    }
+
+    /** 左侧最近一条「不该挡住我们」的平行线终点，用作左延上限。 */
+    private long previousUnselectedEnd(Track track, Note from, List<Note> cluster) {
+        long best = 0;
+        for (Note note : track.notes()) {
+            if (note.isRest() || cluster.contains(note) || note.endTick() > from.startTick()) {
+                continue;
+            }
+            if (followsCluster(note, cluster)) {
+                continue;
+            }
+            best = Math.max(best, note.endTick());
+        }
+        return best;
+    }
+
+    /** note 是否是本组某一员的锁定跟随者（会随锁点一起移动）。 */
+    private static boolean followsCluster(Note note, List<Note> cluster) {
+        if (note.lockLeaderId() == null) {
+            return false;
+        }
+        for (Note member : cluster) {
+            if (member.id().equals(note.lockLeaderId())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** 该平行线是否与正在移动的平行线有锁定关系（双向）。 */
@@ -1260,8 +1536,11 @@ public final class MidiDocumentView extends DocumentView {
 
     /**
      * 让收尾锁定重新贴齐：后一条的头部 = 前一条的尾巴（只移位置、不改长度），沿着链一直传下去。
+     *
+     * @return 是否真的移动过什么（调用方可能需要再跑一轮实体化）
      */
-    private void reflowLocks(List<Track> tracks) {
+    private boolean reflowLocks(List<Track> tracks) {
+        boolean touched = false;
         for (Track track : tracks) {
             int guard = 0;
             boolean changed = true;
@@ -1281,9 +1560,11 @@ public final class MidiDocumentView extends DocumentView {
                 }
                 if (changed) {
                     track.sortNotes();
+                    touched = true;
                 }
             }
         }
+        return touched;
     }
 
     public void commitSelectionEdit(String label) {

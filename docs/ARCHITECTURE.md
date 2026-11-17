@@ -202,7 +202,8 @@ public interface DocumentEdit { String label(); void undo(); void redo(); boolea
 - 视口虚拟化：按 tick 区间二分查找可见平行线，只绘制可见部分 + 1 屏预取。
 - 背景（网格 + 键盘条带）缓存为 `BufferedImage`，键 = (trackId, zoom, scrollX, scrollY, size, theme)，滚动/缩放变化才失效。
 - 播放头动画只 `repaint` 播放头新旧位置的窄条（约 8 px 宽，见 `PianoRollView.repaintPlayhead`），不触发全量重绘；泳道内容变化用脏矩形合并。
-- **局部重绘的硬约束**：`paint()` 里一切「位置固定」的装饰（活动音轨左侧高亮条、锁定圆点、循环区）都必须按 **tick / 视口左边界**（`view.visibleRect().x`）定位，**绝不能**用 `clip.x` —— 播放头每帧只刷一条窄带，用 `clip.x` 就会在窄带起点一路留下竖线（曾经踩过：活动音轨高亮条变成"播放头竖线状尾迹"）。回归测试：`ActiveLanePaintTest`。
+- **局部重绘的硬约束**：`paint()` 里一切「位置固定」的装饰（活动音轨左侧高亮条、锁定圆点、循环区）都必须按 **tick / 视口边界**（`view.visibleRect().x`）定位，**绝不能**用 `clip.x` —— 播放头每帧只刷一条窄带，用 `clip.x` 就会在窄带起点一路留下竖线（曾经踩过：活动音轨高亮条变成"播放头竖线状尾迹"）。回归测试：`ActiveLanePaintTest`。
+- **垂直方向禁止固定贴边装饰**：Swing 垂直滚动是「位块拷贝 + 只补新露出的一条带」，任何贴着视口上下边界画的装饰（播放头顶部三角曾经如此）会被连同内容一起搬走，屏上留下一串旧箭头（音轨多时向上翻尤其明显）。因此**画布里的播放头只有竖线**，顶端三角由 `TimeRuler`（列头，不参与垂直滚动、且按 tick 绝对定位）绘制。回归测试：`PlayheadArrowPaintTest`。
 - 双缓冲由 Swing 默认提供；动画由独立 `javax.swing.Timer`（60 Hz）+ EDT 合并重绘。
 
 **命中与交互**：`HitTester` 统一提供 `hitAt(x,y)`（命中平行线主体 / 右端手柄 6 px / 空白）；`DragSession` 三种模式：MOVE（pitch+time）、RESIZE_END（duration）、MARQUEE。

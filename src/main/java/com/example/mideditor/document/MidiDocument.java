@@ -20,6 +20,8 @@ public final class MidiDocument {
     private final TempoMap tempoMap;
     private final List<TimeSignature> timeSignatures = new ArrayList<>();
     private final List<Track> tracks = new ArrayList<>();
+    /** 指挥轨（第 0 轨）里我们不建模、但要原样写回的 meta：版权、调号、标记…… */
+    private final List<com.example.mideditor.domain.RawMetaEvent> conductorMeta = new ArrayList<>();
     private Path filePath;
     private String name;
     private boolean dirty;
@@ -49,6 +51,11 @@ public final class MidiDocument {
 
     public List<Track> tracks() {
         return tracks;
+    }
+
+    /** 指挥轨里不建模但需要原样保留的 meta（版权、调号、标记等）。 */
+    public List<com.example.mideditor.domain.RawMetaEvent> conductorMeta() {
+        return conductorMeta;
     }
 
     public Path filePath() {

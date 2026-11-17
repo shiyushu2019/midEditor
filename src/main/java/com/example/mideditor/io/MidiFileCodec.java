@@ -27,6 +27,7 @@ import com.example.mideditor.document.MidiDocument;
 import com.example.mideditor.domain.Note;
 import com.example.mideditor.domain.PitchRange;
 import com.example.mideditor.domain.RawChannelEvent;
+import com.example.mideditor.domain.RawMetaEvent;
 import com.example.mideditor.domain.TempoMap;
 import com.example.mideditor.domain.TimeSignature;
 import com.example.mideditor.domain.Track;
@@ -109,8 +110,10 @@ public final class MidiFileCodec {
     private static void readTracks(Sequence sequence, MidiDocument doc) {
         boolean[] usedChannels = new boolean[16];
         int trackNumber = 0;
+        int midiTrackIndex = 0;
 
         for (javax.sound.midi.Track midiTrack : sequence.getTracks()) {
+            boolean conductor = midiTrackIndex++ == 0;
             String trackName = findTrackName(midiTrack);
             PitchRange storedRange = findStoredRange(midiTrack);
             List<Note> storedRests = findStoredRests(midiTrack);
@@ -136,6 +139,13 @@ public final class MidiFileCodec {
                 }
                 channels.values().iterator().next().notes.addAll(storedRests);
             }
+            List<RawMetaEvent> foreignMeta = collectForeignMeta(midiTrack);
+            if (conductor) {
+                // 指挥轨的版权 / 调号 / 标记等挂在文档上，写回时放回指挥轨
+                doc.conductorMeta().addAll(foreignMeta);
+                foreignMeta = List.of();
+            }
+            boolean metaAttached = false;
             for (ChannelData data : channels.values()) {
                 if (data.notes.isEmpty() && !data.programSeen) {
                     continue;
@@ -162,6 +172,13 @@ public final class MidiFileCodec {
                 for (RawChannelEvent raw : data.rawEvents) {
                     track.addRawEvent(raw);
                 }
+                // 一个 MIDI 轨被拆成多条编辑音轨时，外来 meta 只挂在第一条上，避免重复
+                if (!metaAttached) {
+                    for (RawMetaEvent foreign : foreignMeta) {
+                        track.addRawMetaEvent(foreign);
+                    }
+                    metaAttached = true;
+                }
                 track.sortNotes();
                 if (storedRange != null) {
                     track.setYRange(storedRange);
@@ -171,6 +188,33 @@ public final class MidiFileCodec {
                 doc.addTrack(track);
             }
         }
+    }
+
+    /**
+     * 收集「我们不建模、但要原样写回」的 meta：版权(0x02)、调号(0x59)、标记(0x06)、提示(0x07)、
+     * 乐器名(0x04)、歌词(0x05)、SMPTE(0x54)、通道前缀(0x20)、端口(0x21)……
+     * 跳过的：轨道名(0x03)、速度(0x51)、拍号(0x58)、结束(0x2F)、以及本软件自己的标记(0x01)。
+     */
+    private static List<RawMetaEvent> collectForeignMeta(javax.sound.midi.Track midiTrack) {
+        List<RawMetaEvent> result = new ArrayList<>();
+        for (int i = 0; i < midiTrack.size(); i++) {
+            MidiEvent event = midiTrack.get(i);
+            if (!(event.getMessage() instanceof MetaMessage meta)) {
+                continue;
+            }
+            int type = meta.getType();
+            if (type == META_TEXT || type == META_TEMPO || type == META_TIME_SIGNATURE || type == 0x2F) {
+                continue;
+            }
+            if (type == META_MARKER_TEXT) {
+                String text = decodeText(meta.getData());
+                if (text.startsWith(RANGE_MARKER) || text.startsWith(REST_MARKER)) {
+                    continue; // 本软件自己的标记
+                }
+            }
+            result.add(new RawMetaEvent(event.getTick(), type, meta.getData()));
+        }
+        return result;
     }
 
     private static PitchRange findStoredRange(javax.sound.midi.Track midiTrack) {
@@ -301,10 +345,22 @@ public final class MidiFileCodec {
         for (TimeSignature signature : doc.timeSignatures()) {
             conductor.add(new MidiEvent(metaTimeSignature(signature), signature.startTick()));
         }
+        for (RawMetaEvent foreign : doc.conductorMeta()) {
+            conductor.add(new MidiEvent(
+                    new MetaMessage(foreign.type(), foreign.data(), foreign.length()), foreign.tick()));
+        }
 
         for (Track track : doc.tracks()) {
             javax.sound.midi.Track midiTrack = sequence.createTrack();
             midiTrack.add(new MidiEvent(metaText(track.name()), 0));
+            // 音色库选择（CC0/CC32）必须排在 PROGRAM_CHANGE 之前，否则别的软件会选错音色
+            for (RawChannelEvent raw : track.rawEvents()) {
+                if (raw.tick() == 0 && raw.command() == ShortMessage.CONTROL_CHANGE
+                        && (raw.data1() == 0 || raw.data1() == 32)) {
+                    midiTrack.add(new MidiEvent(
+                            shortMessage(raw.command(), track.channel(), raw.data1(), raw.data2()), 0));
+                }
+            }
             midiTrack.add(new MidiEvent(
                     shortMessage(ShortMessage.PROGRAM_CHANGE, track.channel(), track.program(), 0), 0));
             midiTrack.add(new MidiEvent(
@@ -314,7 +370,15 @@ public final class MidiFileCodec {
             midiTrack.add(new MidiEvent(
                     metaMessage(META_MARKER_TEXT, RANGE_MARKER + track.yRange().low() + "," + track.yRange().high()),
                     0));
+            for (RawMetaEvent foreign : track.rawMetaEvents()) {
+                midiTrack.add(new MidiEvent(
+                        new MetaMessage(foreign.type(), foreign.data(), foreign.length()), foreign.tick()));
+            }
             for (RawChannelEvent raw : track.rawEvents()) {
+                if (raw.tick() == 0 && raw.command() == ShortMessage.CONTROL_CHANGE
+                        && (raw.data1() == 0 || raw.data1() == 32)) {
+                    continue; // 上面已经提前写过
+                }
                 midiTrack.add(new MidiEvent(
                         shortMessage(raw.command(), track.channel(), raw.data1(), raw.data2()), raw.tick()));
             }

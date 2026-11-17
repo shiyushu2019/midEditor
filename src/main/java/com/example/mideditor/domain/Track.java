@@ -27,6 +27,7 @@ public final class Track {
     private PitchRange yRange = PitchRange.centered(60, VISIBLE_ROWS);
     private final List<Note> notes = new ArrayList<>();
     private final List<RawChannelEvent> rawEvents = new ArrayList<>();
+    private final List<RawMetaEvent> rawMetaEvents = new ArrayList<>();
 
     /** 每个音轨默认可见的音高行数（可用滚轮 / 视图菜单缩放）。 */
     public static final int VISIBLE_ROWS = 30;
@@ -189,6 +190,15 @@ public final class Track {
 
     public List<RawChannelEvent> rawEventsCopy() {
         return new ArrayList<>(rawEvents);
+    }
+
+    /** 我们不建模但必须原样带回的 meta（版权、调号、标记、乐器名……）。 */
+    public List<RawMetaEvent> rawMetaEvents() {
+        return rawMetaEvents;
+    }
+
+    public void addRawMetaEvent(RawMetaEvent event) {
+        rawMetaEvents.add(event);
     }
 
     public Note noteById(java.util.UUID id) {
