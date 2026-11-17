@@ -1,0 +1,267 @@
+package com.example.mideditor.ui.pianoroll;
+
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.Point;
+import java.awt.Rectangle;
+import java.awt.RenderingHints;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseWheelEvent;
+
+import javax.swing.JComponent;
+import javax.swing.SwingUtilities;
+
+import com.example.mideditor.document.MidiDocument;
+import com.example.mideditor.document.MidiDocumentView;
+import com.example.mideditor.domain.Note;
+import com.example.mideditor.domain.Track;
+import com.example.mideditor.ui.theme.Theme;
+
+/** 钢琴卷帘画布：绘制 + 拖拽 / 框选 / 右键 / 播放头拖拽。 */
+public final class PianoRollCanvas extends JComponent {
+
+    private enum Mode {
+        NONE, MOVE, RESIZE, MARQUEE, PLAYHEAD
+    }
+
+    private final PianoRollView view;
+    private Mode mode = Mode.NONE;
+    private int pressX;
+    private int pressY;
+    private long pressTick;
+    private int pressPitch;
+    private int dragLane;
+    private Track dragTrack;
+    private Rectangle marquee;
+
+    public PianoRollCanvas(PianoRollView view) {
+        this.view = view;
+        setOpaque(true);
+        setBackground(Theme.CANVAS_BACKGROUND);
+        setFocusable(true);
+        setToolTipText("");
+        Handler handler = new Handler();
+        addMouseListener(handler);
+        addMouseMotionListener(handler);
+        addMouseWheelListener(handler);
+    }
+
+    public PianoRollView view() {
+        return view;
+    }
+
+    public Rectangle marquee() {
+        return marquee;
+    }
+
+    private MidiDocumentView host() {
+        return view.host();
+    }
+
+    @Override
+    protected void paintComponent(Graphics g) {
+        Graphics2D g2 = (Graphics2D) g.create();
+        try {
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF);
+            PianoRollPainter.paint(this, g2);
+        } finally {
+            g2.dispose();
+        }
+    }
+
+    @Override
+    public String getToolTipText(MouseEvent event) {
+        HitInfo hit = view.hitTest(event.getX(), event.getY());
+        if (hit.onNote()) {
+            Note note = hit.note();
+            return "平行线 · " + pitchName(note.pitch())
+                    + " · tick " + note.startTick() + " → " + note.endTick()
+                    + " · 长度 " + note.durationTicks()
+                    + " · 力度 " + note.velocity();
+        }
+        if (hit.onEmptySpace()) {
+            return "坐标空白处：右键添加平行线 · " + pitchName(hit.pitch()) + " · tick " + hit.tick();
+        }
+        return null;
+    }
+
+    private static String pitchName(int pitch) {
+        String[] names = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+        return names[Math.floorMod(pitch, 12)] + (pitch / 12 - 1);
+    }
+
+    private final class Handler extends MouseAdapter {
+
+        @Override
+        public void mousePressed(MouseEvent e) {
+            requestFocusInWindow();
+            MidiDocument document = host().document();
+            int ppq = document.ppq();
+            HitInfo hit = view.hitTest(e.getX(), e.getY());
+
+            if (SwingUtilities.isRightMouseButton(e)) {
+                openContextMenu(e, hit);
+                return;
+            }
+            if (hit.track() == null) {
+                return;
+            }
+
+            int playheadX = view.timeline().xAtTick(host().playheadTick(), ppq);
+            if (Math.abs(e.getX() - playheadX) <= 4) {
+                mode = Mode.PLAYHEAD;
+                host().seekTick(view.timeline().tickAtX(e.getX(), ppq));
+                return;
+            }
+
+            if (hit.onNote()) {
+                host().setActiveTrack(hit.track());
+                if (e.isShiftDown() || e.isControlDown()) {
+                    host().selection().toggle(hit.note());
+                } else if (!host().selection().contains(hit.note())) {
+                    host().selection().setSingle(hit.note());
+                }
+                if (host().selection().contains(hit.note())) {
+                    mode = hit.rightEdge() ? Mode.RESIZE : Mode.MOVE;
+                    dragTrack = hit.track();
+                    dragLane = hit.laneIndex();
+                    pressX = e.getX();
+                    pressY = e.getY();
+                    pressTick = view.timeline().tickAtX(e.getX(), ppq);
+                    pressPitch = hit.pitch();
+                    host().beginSelectionEdit();
+                }
+                return;
+            }
+
+            if (!e.isShiftDown()) {
+                host().selection().clear();
+            }
+            host().setActiveTrack(hit.track());
+            mode = Mode.MARQUEE;
+            pressX = e.getX();
+            pressY = e.getY();
+            marquee = new Rectangle(pressX, pressY, 0, 0);
+            repaint();
+        }
+
+        @Override
+        public void mouseDragged(MouseEvent e) {
+            MidiDocument document = host().document();
+            int ppq = document.ppq();
+            switch (mode) {
+                case PLAYHEAD -> host().seekTick(view.timeline().tickAtX(e.getX(), ppq));
+                case MARQUEE -> {
+                    marquee = new Rectangle(
+                            Math.min(pressX, e.getX()), Math.min(pressY, e.getY()),
+                            Math.abs(e.getX() - pressX), Math.abs(e.getY() - pressY));
+                    repaint();
+                }
+                case MOVE -> {
+                    if (dragTrack == null) {
+                        return;
+                    }
+                    long rawTick = view.timeline().tickAtX(e.getX(), ppq) - pressTick;
+                    int currentPitch = view.pitchAt(dragTrack, dragLane, e.getY());
+                    host().applySelectionMove(rawTick, currentPitch - pressPitch);
+                    view.repaint();
+                }
+                case RESIZE -> {
+                    long rawTick = view.timeline().tickAtX(e.getX(), ppq) - pressTick;
+                    host().applySelectionResize(rawTick);
+                    view.repaint();
+                }
+                default -> {
+                }
+            }
+        }
+
+        @Override
+        public void mouseReleased(MouseEvent e) {
+            switch (mode) {
+                case MOVE -> host().commitSelectionEdit("移动平行线");
+                case RESIZE -> host().commitSelectionEdit("调整平行线长度");
+                case MARQUEE -> {
+                    Rectangle rect = marquee;
+                    marquee = null;
+                    if (rect != null && (rect.width > 3 || rect.height > 3)) {
+                        host().selectInRect(rect);
+                    }
+                    repaint();
+                }
+                default -> {
+                }
+            }
+            mode = Mode.NONE;
+            dragTrack = null;
+            mouseMoved(e);
+        }
+
+        @Override
+        public void mouseMoved(MouseEvent e) {
+            HitInfo hit = view.hitTest(e.getX(), e.getY());
+            if (hit.onNote() && hit.rightEdge()) {
+                setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.E_RESIZE_CURSOR));
+            } else {
+                setCursor(java.awt.Cursor.getDefaultCursor());
+            }
+        }
+
+        @Override
+        public void mouseClicked(MouseEvent e) {
+            if (e.getClickCount() == 2 && SwingUtilities.isLeftMouseButton(e)) {
+                HitInfo hit = view.hitTest(e.getX(), e.getY());
+                if (hit.onEmptySpace()) {
+                    int ppq = host().document().ppq();
+                    long snapped = host().grid().snap(hit.tick(), ppq);
+                    host().addNoteAt(hit.track(), snapped, hit.pitch());
+                }
+            }
+        }
+
+        @Override
+        public void mouseWheelMoved(MouseWheelEvent e) {
+            MidiDocument document = host().document();
+            int ppq = document.ppq();
+            if (e.isControlDown()) {
+                long anchorTick = view.timeline().tickAtX(e.getX(), ppq);
+                double factor = e.getWheelRotation() < 0 ? 1.15 : 1 / 1.15;
+                view.timeline().setPxPerQuarter(view.timeline().pxPerQuarter() * factor);
+                Rectangle visible = view.visibleRect();
+                int newX = view.timeline().xAtTick(anchorTick, ppq);
+                view.scrollPane().getViewport().setViewPosition(
+                        new Point(Math.max(0, visible.x + (newX - e.getX())), visible.y));
+                e.consume();
+            } else if (e.isAltDown()) {
+                HitInfo hit = view.hitTest(e.getX(), e.getY());
+                if (hit.track() != null) {
+                    int delta = e.getWheelRotation() > 0 ? -1 : 1;
+                    Track track = hit.track();
+                    track.setYRange(track.yRange().shifted(delta));
+                    view.refreshPitchLabels();
+                    view.repaint();
+                }
+                e.consume();
+            }
+        }
+
+        private void openContextMenu(MouseEvent e, HitInfo hit) {
+            MidiDocument document = host().document();
+            long tick = hit.tick();
+            if (hit.onNote()) {
+                host().setActiveTrack(hit.track());
+                if (!host().selection().contains(hit.note())) {
+                    host().selection().setSingle(hit.note());
+                }
+                host().setPendingSplit(tick);
+            } else if (hit.onEmptySpace()) {
+                host().setActiveTrack(hit.track());
+                host().selection().clear();
+                host().setPendingAdd(host().grid().snap(tick, document.ppq()), hit.pitch());
+                host().setPendingSplit(tick);
+            }
+            PianoRollContextMenu.show(PianoRollCanvas.this, hit, new Point(e.getX(), e.getY()));
+        }
+    }
+}

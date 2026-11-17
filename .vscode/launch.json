@@ -1,0 +1,14 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "java",
+      "name": "midEditor",
+      "request": "launch",
+      "mainClass": "com.example.mideditor.MidiEditorApp",
+      "projectName": "mid-editor",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}
