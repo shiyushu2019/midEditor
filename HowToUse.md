@@ -13,7 +13,7 @@ Maven 已安装到 `D:\Tools\apache-maven-3.10.1`，用户级 `Path` 已包含�
 
 ```powershell
 mvn clean package
-java -jar target\mid-editor-1.0.0-SNAPSHOT.jar
+java -jar target\mid-editor-1.0.0.jar
 ```
 
 若当前终端还是旧会话（PATH 未刷新），新开一个终端即可；仍不行时确认用户级环境变量已生效（必要时重启 VS Code）。

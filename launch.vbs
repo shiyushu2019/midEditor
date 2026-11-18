@@ -6,7 +6,7 @@ Set fso = CreateObject("Scripting.FileSystemObject")
 Set shell = CreateObject("WScript.Shell")
 
 base = fso.GetParentFolderName(WScript.ScriptFullName)
-jar = base & "\target\mid-editor-1.0.0-SNAPSHOT.jar"
+jar = base & "\target\mid-editor-1.0.0.jar"
 
 If Not fso.FileExists(jar) Then
     shell.CurrentDirectory = base
