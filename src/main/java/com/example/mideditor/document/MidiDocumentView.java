@@ -766,31 +766,30 @@ public final class MidiDocumentView extends DocumentView {
 
     /** 选中项 + 通过收尾锁定连在一起的整组（用于方向键 / 整组移动）。 */
     private java.util.Set<java.util.UUID> movingIds(Track track) {
+        LockIndex index = new LockIndex(track);
         java.util.Set<java.util.UUID> ids = new java.util.HashSet<>();
+        java.util.ArrayDeque<Note> queue = new java.util.ArrayDeque<>();
         for (Note note : track.notes()) {
             if (selection().contains(note)) {
                 ids.add(note.id());
+                queue.add(note);
             }
         }
-        boolean added = true;
-        while (added) {
-            added = false;
-            for (Note note : track.notes()) {
-                if (ids.contains(note.id())) {
-                    continue;
+        while (!queue.isEmpty()) {
+            Note note = queue.poll();
+            java.util.UUID leaderId = note.lockLeaderId();
+            if (leaderId != null) {
+                Note leader = index.byId.get(leaderId);
+                if (leader != null && ids.add(leader.id())) {
+                    queue.add(leader);
                 }
-                boolean linked = note.lockLeaderId() != null && ids.contains(note.lockLeaderId());
-                if (!linked) {
-                    for (Note other : track.notes()) {
-                        if (ids.contains(other.id()) && note.id().equals(other.lockLeaderId())) {
-                            linked = true;
-                            break;
-                        }
+            }
+            List<Note> linked = index.followers.get(note.id());
+            if (linked != null) {
+                for (Note follower : linked) {
+                    if (ids.add(follower.id())) {
+                        queue.add(follower);
                     }
-                }
-                if (linked) {
-                    ids.add(note.id());
-                    added = true;
                 }
             }
         }
@@ -968,23 +967,39 @@ public final class MidiDocumentView extends DocumentView {
         primarySelection.clear();
         restRippleStarts.clear();
         for (Track track : tracks) {
+            LockIndex index = new LockIndex(track);
             for (Note note : track.notes()) {
                 if (selection().contains(note)) {
                     primarySelection.add(note.id());
                     recordSelectionOrigin(note);
                 }
             }
-            // 收尾锁定：整条链一起动（否则锁住的关系会被拖开）
-            boolean added = true;
-            while (added) {
-                added = false;
-                for (Note note : track.notes()) {
-                    if (selectionOrigin.containsKey(note.id())) {
-                        continue;
+            // 收尾锁定：整条链一起动（否则锁住的关系会被拖开）。
+            // 用「索引 + 工作队列」一次闭包：旧实现是 while + 每条音符扫全表，平方级，
+            // 长文件里一按下鼠标/开始拖拽就卡住（2 万音符时单次点击要几百毫秒）。
+            java.util.ArrayDeque<Note> queue = new java.util.ArrayDeque<>();
+            for (Note note : track.notes()) {
+                if (selectionOrigin.containsKey(note.id())) {
+                    queue.add(note);
+                }
+            }
+            while (!queue.isEmpty()) {
+                Note note = queue.poll();
+                UUID leaderId = note.lockLeaderId();
+                if (leaderId != null) {
+                    Note leader = index.byId.get(leaderId);
+                    if (leader != null && !selectionOrigin.containsKey(leader.id())) {
+                        recordSelectionOrigin(leader);
+                        queue.add(leader);
                     }
-                    if (linkedToMoving(track, note)) {
-                        recordSelectionOrigin(note);
-                        added = true;
+                }
+                List<Note> linked = index.followers.get(note.id());
+                if (linked != null) {
+                    for (Note follower : linked) {
+                        if (!selectionOrigin.containsKey(follower.id())) {
+                            recordSelectionOrigin(follower);
+                            queue.add(follower);
+                        }
                     }
                 }
             }
@@ -1399,17 +1414,21 @@ public final class MidiDocumentView extends DocumentView {
         return false;
     }
 
-    /** 该平行线是否与正在移动的平行线有锁定关系（双向）。 */
-    private boolean linkedToMoving(Track track, Note note) {
-        if (note.lockLeaderId() != null && selectionOrigin.containsKey(note.lockLeaderId())) {
-            return true;
-        }
-        for (Note other : track.notes()) {
-            if (selectionOrigin.containsKey(other.id()) && note.id().equals(other.lockLeaderId())) {
-                return true;
+    /** 收尾锁定的索引：id → 音符、leader id → 直接跟随者。建一次即可做 O(n) 的链式闭包。 */
+    private static final class LockIndex {
+
+        final java.util.Map<UUID, Note> byId = new java.util.HashMap<>();
+        final java.util.Map<UUID, List<Note>> followers = new java.util.HashMap<>();
+
+        LockIndex(Track track) {
+            for (Note note : track.notes()) {
+                byId.put(note.id(), note);
+                UUID leaderId = note.lockLeaderId();
+                if (leaderId != null) {
+                    followers.computeIfAbsent(leaderId, key -> new ArrayList<>()).add(note);
+                }
             }
         }
-        return false;
     }
 
     public void applySelectionMove(long deltaTicks, int deltaPitch) {
@@ -1542,16 +1561,30 @@ public final class MidiDocumentView extends DocumentView {
     private boolean reflowLocks(List<Track> tracks) {
         boolean touched = false;
         for (Track track : tracks) {
+            boolean hasLocks = false;
+            for (Note note : track.notes()) {
+                if (note.lockLeaderId() != null) {
+                    hasLocks = true;
+                    break;
+                }
+            }
+            if (!hasLocks) {
+                continue; // 绝大多数音轨没有锁定：不必拷贝整张列表
+            }
             int guard = 0;
             boolean changed = true;
             while (changed && guard++ < 512) {
                 changed = false;
+                java.util.Map<UUID, Note> byId = new java.util.HashMap<>(track.notes().size() * 2);
+                for (Note note : track.notes()) {
+                    byId.put(note.id(), note);
+                }
                 List<Note> snapshot = new ArrayList<>(track.notes());
                 for (Note note : snapshot) {
                     if (note.lockLeaderId() == null) {
                         continue;
                     }
-                    Note leader = track.noteById(note.lockLeaderId());
+                    Note leader = byId.get(note.lockLeaderId());
                     if (leader == null || note.startTick() == leader.endTick()) {
                         continue;
                     }

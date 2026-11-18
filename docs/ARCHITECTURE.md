@@ -206,6 +206,12 @@ public interface DocumentEdit { String label(); void undo(); void redo(); boolea
 - **垂直方向禁止固定贴边装饰**：Swing 垂直滚动是「位块拷贝 + 只补新露出的一条带」，任何贴着视口上下边界画的装饰（播放头顶部三角曾经如此）会被连同内容一起搬走，屏上留下一串旧箭头（音轨多时向上翻尤其明显）。因此**画布里的播放头只有竖线**，顶端三角由 `TimeRuler`（列头，不参与垂直滚动、且按 tick 绝对定位）绘制。回归测试：`PlayheadArrowPaintTest`。
 - 双缓冲由 Swing 默认提供；动画由独立 `javax.swing.Timer`（60 Hz）+ EDT 合并重绘。
 
+**长文件的复杂度红线（编辑路径必须线性）**
+- `Track.reconcileRests()` 用「休止符 / 空隙双指针合并」O(rests+gaps)；旧实现是每条休止符扫全部空隙（平方级，2 万音符单次 200 ms+），而每次编辑/拖拽都会调它。
+- 收尾锁定的闭包（`beginSelectionEdit` / `movingIds`）先用 `LockIndex`（id→音符、leader→跟随者）建索引再工作队列 BFS；旧实现是「每条音符扫全表」= O(n²)，长文件下一按下鼠标就卡。
+- `Track.addNote` 顺序追加走 O(1) 快路径（导入长文件曾达 5 万音符 1.9 秒）；`reconcileRests` 补缺口时先追加再统一排序，不用线性插入。
+- 回归测试 `LongFileEditPerformanceTest`（2 万音符，时间上限只用来兜住算法退化，不追求精确数值）。
+
 **命中与交互**：`HitTester` 统一提供 `hitAt(x,y)`（命中平行线主体 / 右端手柄 6 px / 空白）；`DragSession` 三种模式：MOVE（pitch+time）、RESIZE_END（duration）、MARQUEE。
 
 ## 5. 播放调度方案
