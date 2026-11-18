@@ -52,6 +52,14 @@ public final class GapRests {
                 cursorPitch = note.pitch();
             }
         }
+        // 契约是「按时间升序」：正常情况（notes 已排序）本来就成立，只在检测到乱序时才付排序成本，
+        // 让调用方可以放心地按双指针线性合并（Track.reconcileRests）。
+        for (int i = 1; i < spans.size(); i++) {
+            if (spans.get(i).startTick() < spans.get(i - 1).startTick()) {
+                spans.sort(java.util.Comparator.comparingLong(Span::startTick));
+                break;
+            }
+        }
         return spans;
     }
 }
