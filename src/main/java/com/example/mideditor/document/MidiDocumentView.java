@@ -2,6 +2,7 @@ package com.example.mideditor.document;
 
 import java.awt.BorderLayout;
 import java.awt.Rectangle;
+import java.awt.event.KeyEvent;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -43,6 +44,8 @@ public final class MidiDocumentView extends DocumentView {
     private final Map<UUID, long[]> selectionOrigin = new HashMap<>();
     /** 本大拖拽事务中「用户真正选中的」平行线（不含因收尾锁定被纳入的同伴）。 */
     private final java.util.Set<UUID> primarySelection = new java.util.HashSet<>();
+    /** 上一次输入模式落下的那条平行线（连奏时把它拉到新音的起点）。 */
+    private UUID lastInputNoteId;
     /** 拖拽休止符时，它所在音轨所有音的原始起点（用于把后面的音整体平移）。 */
     private final Map<UUID, Long> restRippleStarts = new HashMap<>();
 
@@ -63,6 +66,8 @@ public final class MidiDocumentView extends DocumentView {
     private long pendingAddTick;
     private int pendingAddPitch = 60;
     private long pendingSplitTick;
+    /** 上次在频谱上点击的位置：粘贴时内容就从这里开始（-1 = 还没点过，退回播放头）。 */
+    private long pasteAnchorTick = -1;
 
     /** 输入模式：画布上那个红色圆点光标。 */
     private boolean inputMode;
@@ -82,15 +87,14 @@ public final class MidiDocumentView extends DocumentView {
     private int auditionChannel = -1;
     private int auditionPitch = -1;
 
-    /** 输入模式：节奏辅助——输入的起点与时值自动吸附到当前网格（网格关闭时退回一拍）。 */
+    /** 输入模式：节奏辅助——手动挪过光标时，起点吸附到当前网格（网格关闭时退回一拍）。 */
     private boolean inputBeatSnap;
-    /** 节奏辅助的锚点：连续输入时以第一次按下为时间原点，把真实节奏投到网格上。 */
-    private boolean assistAnchored;
-    private long assistAnchorNanos;
-    private long assistAnchorTick;
-    private long lastInputReleaseNanos;
-    /** 停顿超过这个时长就重新锚定到光标处，免得离开一会儿后音符被摆到老远右边。 */
-    private static final long PAUSE_REANCHOR_NANOS = 1_500_000_000L;
+    /** 小键盘 +/- 累计的八度偏移：数字键按「光标当前八度 + jump」取音高，输完一个音就归零。 */
+    private int inputOctaveJump;
+    /** 大键盘 +/=（+1）或 -/_（-1）当前是否按着：按住时小键盘数字整体高/低一个八度，0 = 没按。 */
+    private int inputOctaveHold;
+    /** 正在输入的这条音由哪个键按下（空格 / 小键盘数字），松手时只认这个键；0 = 不限制。 */
+    private int inputNoteKey;
     /** 可注入的时钟（测试用来精确控制“按了多久 / 隔了多久”）。 */
     private java.util.function.LongSupplier nanoClock = System::nanoTime;
 
@@ -134,6 +138,11 @@ public final class MidiDocumentView extends DocumentView {
         return pianoRoll;
     }
 
+    /** 底部传输条（BPM / 网格 / 缩放都在这里，测试也要用）。 */
+    public TransportBar transportBar() {
+        return transport;
+    }
+
     @Override
     public Track activeTrack() {
         return activeTrack;
@@ -148,11 +157,12 @@ public final class MidiDocumentView extends DocumentView {
             return;
         }
         activeTrack = track;
+        // 换了音轨就不再接着说上一轨的那条音
+        lastInputNoteId = null;
         if (inputMode && track != null) {
             // 换轨后音域窗口可能不一样：把新音轨的频谱翻到光标处，而不是把光标挪走
             scrollPitchWindowToCursor(track);
         }
-        assistAnchored = false;
         int index = document().tracks().indexOf(track);
         if (index >= 0) {
             pianoRoll.scrollToLane(index);
@@ -328,14 +338,14 @@ public final class MidiDocumentView extends DocumentView {
         editStack().undo();
         afterEdit(true);
         syncCursorAfterUndo();
-        assistAnchored = false;
+        lastInputNoteId = null;
     }
 
     public void redo() {
         editStack().redo();
         afterEdit(true);
         syncCursorAfterRedo();
-        assistAnchored = false;
+        lastInputNoteId = null;
     }
 
     /** 撤销掉的正是刚输入的那条时，把光标退回按下前的位置。 */
@@ -383,12 +393,28 @@ public final class MidiDocumentView extends DocumentView {
         if (!on) {
             endInputAudition();
             abortInputNote(); // 退出时光标边上正按着的那个音作废，但声音要收掉
-            assistAnchored = false;
+            lastInputNoteId = null;
         }
         inputMode = on;
+        // 八度偏移只在这一次输入模式里有效，不跨会话保留
+        inputOctaveJump = 0;
+        inputOctaveHold = 0;
         if (on) {
-            inputCursorTick = Math.max(0, grid.snap(playheadTick, document().ppq()));
-            inputCursorPitch = Math.max(0, Math.min(127, inputCursorPitch));
+            // 光标放到当前可见频谱的正中间：横向取视口中点换算成 tick（吸附网格），
+            // 纵向取活动音轨泳道的中间行（音域窗口正好铺满泳道，所以它就是“看到的那一段的中间”）
+            java.awt.Rectangle visible = pianoRoll.visibleRect();
+            Track track = activeTrack;
+            int lane = track == null ? -1 : document().tracks().indexOf(track);
+            long centerTick = visible.width > 0
+                    ? pianoRoll.timeline().tickAtX(visible.x + visible.width / 2, document().ppq())
+                    : playheadTick;
+            int centerPitch = inputCursorPitch;
+            if (track != null && lane >= 0 && visible.height > 0) {
+                centerPitch = pianoRoll.pitchAt(track, lane,
+                        pianoRoll.laneTop(lane) + pianoRoll.laneHeight() / 2);
+            }
+            inputCursorTick = Math.max(0, grid.snap(centerTick, document().ppq()));
+            inputCursorPitch = Math.max(0, Math.min(127, centerPitch));
             // 光标不在可见音域里就把频谱翻过去，而不是把光标“按”在边上
             scrollPitchWindowToCursor(activeTrack);
             pianoRoll.scrollToTick(inputCursorTick);
@@ -414,17 +440,95 @@ public final class MidiDocumentView extends DocumentView {
         if (!inputMode) {
             return;
         }
-        // 手动挪光标 = 重新锚定：之后从新位置重新计时
-        assistAnchored = false;
+        // 手动挪光标 = 断开与上一条的接续（之后按下的音从新位置开始）
+        lastInputNoteId = null;
         moveCursorTo(inputCursorTick + tickSteps * gridStepTicks(), inputCursorPitch + pitchSteps);
     }
 
+    // ------------------------------------------------ 小键盘数字输入（简谱）
+
+    /*
+     * 第二套输入手法，和 WASD + 空格并存：小键盘 1~7 直接就是简谱的 do/re/mi/fa/sol/la/si，
+     * 按下就把光标切到那个音高并开始计时（不用先按空格），松手照样落成平行线；
+     * 小键盘 +/- 调整八度，作用范围是「接下来按下的那个数字」，输完就归零。
+     */
+
+    /** 简谱 1..7（C 大调）相对所在八度 C 的半音数。 */
+    private static final int[] DEGREE_SEMITONES = { 0, 2, 4, 5, 7, 9, 11 };
+
+    /** 小键盘 + / -：八度偏移 ±1（夹在 ±9），只影响接下来按下的数字，输完一个音就归零。 */
+    public void shiftInputOctaveJump(int steps) {
+        if (!inputMode || steps == 0) {
+            return;
+        }
+        inputOctaveJump = Math.max(-9, Math.min(9, inputOctaveJump + steps));
+        pianoRoll.canvas().repaint();
+    }
+
+    /** 当前累计的八度偏移（小键盘 +/- 之后、下一条音之前有效）。 */
+    public int inputOctaveJump() {
+        return inputOctaveJump;
+    }
+
     /**
-     * 节奏辅助：输入的音符自动吸附到<b>当前网格分辨率</b>。
+     * 大键盘 +/= 按下（+1）/ -/_ 按下（-1）/ 松开（0）—— <b>按住</b>时接下来按下的数字整体高/低八度；
+     * 因为它是物理按键状态，所以按住期间连敲多个数字都有效，松开就失效。
+     */
+    public void setInputOctaveHold(int direction) {
+        int normalized = Integer.signum(direction);
+        if (inputOctaveHold == normalized) {
+            return;
+        }
+        inputOctaveHold = normalized;
+        pianoRoll.canvas().repaint();
+    }
+
+    /** 大键盘 +/- 当前挂着的八度方向（0 = 没按）。 */
+    public int inputOctaveHold() {
+        return inputOctaveHold;
+    }
+
+    /**
+     * 小键盘 1~7：光标立刻切到这个数字在简谱里对应的音高并开始输入（不需要按空格），
+     * 松手时按按住时长落成平行线 —— 走的就是空格那条 {@code beginInputNote/endInputNote} 路径。
+     *
+     * <p>
+     * 音高 = 光标所在八度的 C 往上数一个 C 大调音阶（1=do 2=re 3=mi 4=fa 5=sol 6=la 7=si），
+     * 再整体加减 {@link #shiftInputOctaveJump(int)} 累计的八度偏移。
+     * </p>
+     */
+    public void beginInputDegreeNote(int degree) {
+        beginInputDegreeNote(degree, 1);
+    }
+
+    /**
+     * 同上；{@code octaveScale} 是「按住大键盘 +/-​ 该翻几个八度」的倍数：
+     * 通常传 1（翻一个八度），同时按着 Ctrl 时传 2（翻两个八度）。
+     */
+    public void beginInputDegreeNote(int degree, int octaveScale) {
+        if (!inputMode || degree < 1 || degree > 7 || inputNoteHeld) {
+            return;
+        }
+        int shift = inputOctaveJump + inputOctaveHold * Math.max(1, octaveScale);
+        beginInputNote(degreePitch(degree, inputCursorPitch, shift),
+                KeyEvent.VK_NUMPAD0 + degree);
+    }
+
+    /** 以 referencePitch 所在八度为基准，取简谱 degree（1..7）对应的 MIDI 音高。 */
+    static int degreePitch(int degree, int referencePitch, int octaveJump) {
+        int safeDegree = Math.max(1, Math.min(7, degree));
+        int octave = Math.floorDiv(Math.max(0, Math.min(127, referencePitch)), 12) + octaveJump;
+        int pitch = octave * 12 + DEGREE_SEMITONES[safeDegree - 1];
+        return Math.max(0, Math.min(127, pitch));
+    }
+
+    /**
+     * 节奏辅助：输入的音符<b>起点与时值都吸附到当前网格</b>。
      *
      * <p>
      * 所以要写八分音符就把网格选成 1/8，要写三连音就选 1/8 三连音——辅助跟着网格走，
-     * 不写死成“一拍”；网格选「关闭」时退回按一拍吸附（总比完全不吸附好用）。
+     * 不写死成“一拍”；网格选「关闭」时退回按一拍吸附。连续输入时新音直接接在上一条末尾，
+     * 两次按键之间隔多久都不会生成休止符。
      * </p>
      */
     public boolean inputBeatSnap() {
@@ -436,7 +540,7 @@ public final class MidiDocumentView extends DocumentView {
             return;
         }
         inputBeatSnap = on;
-        assistAnchored = false;
+        lastInputNoteId = null;
         pianoRoll.canvas().repaint();
         app().refreshApplicationState();
     }
@@ -543,66 +647,109 @@ public final class MidiDocumentView extends DocumentView {
 
     /** 空格按下：开始计时并立刻出声（按住多久就响多久）。键盘自动重复不会重置起点。 */
     public void beginInputNote() {
+        beginInputNote(inputCursorPitch, KeyEvent.VK_SPACE);
+    }
+
+    /**
+     * 按下某个键开始输入：{@code pitch} 是这条音的音高（小键盘数字会先把光标切过去），
+     * {@code sourceKey} 记下是哪个键按的 —— 松手时只认它，空格与小键盘数字不会互相打断。
+     */
+    private void beginInputNote(int pitch, int sourceKey) {
         if (!inputMode || inputNoteHeld) {
             return;
         }
+        int target = Math.max(0, Math.min(127, pitch));
+        if (target != inputCursorPitch) {
+            moveCursorTo(inputCursorTick, target);
+        }
         inputNoteHeld = true;
+        inputNoteKey = sourceKey;
         inputNoteDownNanos = nanoClock.getAsLong();
         inputNoteStartTick = inputCursorTick;
-        inputNoteStartPitch = inputCursorPitch;
-        // 节奏辅助：以“第一次按下”为锚点，之后每个音按真实经过时间投到网格上（识别节奏）
-        if (inputBeatSnap) {
-            boolean paused = lastInputReleaseNanos > 0
-                    && inputNoteDownNanos - lastInputReleaseNanos > PAUSE_REANCHOR_NANOS;
-            if (!assistAnchored || paused) {
-                assistAnchorNanos = inputNoteDownNanos;
-                assistAnchorTick = snapTickToAssistUnit(inputCursorTick);
-                assistAnchored = true;
-            }
-        }
+        inputNoteStartPitch = target;
         startInputPreview();
         pianoRoll.canvas().repaint();
     }
 
-    /** 空格松开：按住的真实时长 -> tick -> 落成平行线，光标跟到末尾（可立即接着输入下一个音）。 */
+    /**
+     * 空格松开：按住的真实时长 -> tick -> 落成平行线，光标跟到末尾（可立即接着输入下一个音）。
+     *
+     * <p>
+     * 时值就是按住的那段时间，节奏辅助也不会把它四舍五入；位置取按下时的光标，
+     * 而光标在上一条音输入完就停在它的末尾 —— 所以连续输入天然首尾相接，
+     * <b>两次按键之间隔了多久都不会凭空多出休止符，也不会把音拉长</b>。
+     * 想留空隙就把光标（A/D）挪开再按，挪动之后节奏辅助会把起点吸到网格上。
+     * </p>
+     */
     public void endInputNote() {
         if (!inputNoteHeld) {
             return;
         }
         inputNoteHeld = false;
-        long now = nanoClock.getAsLong();
-        long nanos = now - inputNoteDownNanos;
-        lastInputReleaseNanos = now;
+        inputNoteKey = 0;
+        // 八度偏移只管这一下：输完一个音就回到默认八度，不留给下一个音
+        inputOctaveJump = 0;
+        long nanos = nanoClock.getAsLong() - inputNoteDownNanos;
         stopInputPreview();
         Track track = activeTrack;
         if (track == null) {
             pianoRoll.canvas().repaint();
             return;
         }
-        long start = inputNoteStartTick;
         int pitch = inputNoteStartPitch;
-        long duration = heldNanosToTicks(nanos, start);
+        Note previous = inputBeatSnap && lastInputNoteId != null ? track.noteById(lastInputNoteId) : null;
+        long start = inputNoteStartTick;
         if (inputBeatSnap) {
-            if (assistAnchored) {
-                // 重点：起点按「距锚点的真实时间」换算，再贴网格。
-                // 这样连续敲出来的节奏会落在正确的网格位置上，而不会因为上一条音的取整误差一路偏移。
-                long elapsedMicros = Math.max(0, (inputNoteDownNanos - assistAnchorNanos) / 1000);
-                long rawOnset = assistAnchorTick
-                        + microsToTicks(Math.max(1, elapsedMicros), assistAnchorTick);
-                start = snapTickToAssistUnit(rawOnset);
-            } else {
-                start = snapTickToAssistUnit(start);
+            // 光标自动停在上一条末尾时直接接上去（不吸取整误差，也不留缝）；手动挪过光标才吸附网格
+            boolean rightAfterPrevious = previous != null && !previous.isRest()
+                    && inputNoteStartTick == previous.endTick();
+            if (!rightAfterPrevious) {
+                start = snapTickToAssistUnit(inputNoteStartTick);
             }
-            duration = snapDurationToAssistUnit(duration, start);
         }
-        Note created = new Note(pitch, start, duration, 100);
-        edit(track, "输入平行线", () -> track.addNote(created));
-        inputSteps.push(new InputCursorStep(track, created.id(), start, pitch, start + duration, pitch));
+        final long finalStart = start;
+        long duration = heldNanosToTicks(nanos, finalStart);
+        if (inputBeatSnap) {
+            // 节奏辅助：时值吸附到网格（至少一格）；起点本来就在网格上，因此两端都对齐
+            duration = snapDurationToAssistUnit(duration, finalStart);
+        }
+        final Note previousNote = previous;
+        Note created = new Note(pitch, finalStart, duration, 100);
+        edit(track, "输入平行线", () -> {
+            if (previousNote != null && !previousNote.isRest()) {
+                // 只防“叠在同一条上”：用户把光标挪回去再按，就当作要在它里面起始
+                if (created.startTick() <= previousNote.startTick()) {
+                    created.setStartTick(previousNote.endTick());
+                } else if (created.startTick() < previousNote.endTick()) {
+                    previousNote.setDurationTicks(
+                            Math.max(1, created.startTick() - previousNote.startTick()));
+                }
+            }
+            track.addNote(created);
+            // 上一条被裁剪过：它锁着的同伴也要跟着贴回来
+            reflowLocks(java.util.List.of(track));
+        });
+        lastInputNoteId = created.id();
+        inputSteps.push(new InputCursorStep(track, created.id(), created.startTick(), pitch,
+                created.endTick(), pitch));
         while (inputSteps.size() > INPUT_STEPS_LIMIT) {
             inputSteps.removeLast();
         }
         undoneInputSteps.clear();
-        moveCursorTo(start + duration, pitch);
+        moveCursorTo(created.endTick(), pitch);
+        // 刚输入的这条就是当前的选中对象：高亮、接着按方向键走位都落在它身上（只替换选中，不清别的规则）
+        selection().setSingle(created);
+    }
+
+    /** 松手：只有「按下的还是同一个键」才收尾（空格和小键盘数字可以各按各的，互不打断）。 */
+    public void endInputNoteFromKey(int keyCode) {
+        if (!inputNoteHeld) {
+            return;
+        }
+        if (inputNoteKey != 0 && inputNoteKey != keyCode) {
+            return;
+        }
+        endInputNote();
     }
 
     /** 半途放弃（退出输入模式 / 窗口失焦且不想保留时）：不出音符，但一定要把声音收掉。 */
@@ -611,6 +758,7 @@ public final class MidiDocumentView extends DocumentView {
             return;
         }
         inputNoteHeld = false;
+        inputNoteKey = 0;
         stopInputPreview();
         pianoRoll.canvas().repaint();
     }
@@ -656,8 +804,8 @@ public final class MidiDocumentView extends DocumentView {
         if (!inputNoteHeld) {
             return 0;
         }
+        // 幽灵条长度 = 松手后会落成的长度（辅助开着时就是吸附后的值，所见即所得）
         long ticks = heldNanosToTicks(nanoClock.getAsLong() - inputNoteDownNanos, inputCursorTick);
-        // 节奏辅助开着时，幽灵条直接显示吸附后的长度，所见即所得
         return inputBeatSnap ? snapDurationToAssistUnit(ticks, inputCursorTick) : ticks;
     }
 
@@ -673,6 +821,8 @@ public final class MidiDocumentView extends DocumentView {
     }
 
     public void togglePlayPause() {
+        // 先把“输了但没回车”的 BPM 落地：否则按 F5 播的还是旧速度，看起来就是“调了没生效”
+        transport.commitBpmEdit();
         PlaybackEngine engine = app().playback();
         if (!engine.state().equals(PlaybackEngine.State.STOPPED) && engine.owner() != this) {
             engine.stop();
@@ -694,6 +844,8 @@ public final class MidiDocumentView extends DocumentView {
         if (engine.owner() == this) {
             engine.stop();
             playheadTick = 0;
+            // 停在开头时频谱也回到开头，不然看到的是尾巴、播放头却在屏幕外
+            pianoRoll.scrollToTimeStart();
         }
         refresh();
         app().refreshApplicationState();
@@ -701,6 +853,7 @@ public final class MidiDocumentView extends DocumentView {
 
     public void rewind() {
         seekTick(0);
+        pianoRoll.scrollToTimeStart();
     }
 
     public void toggleLoop() {
@@ -872,6 +1025,11 @@ public final class MidiDocumentView extends DocumentView {
 
     public long pendingSplitTick() {
         return pendingSplitTick;
+    }
+
+    /** 记住鼠标在频谱上最后点击的位置（粘贴的落点，只决定时间轴位置）。 */
+    public void setPasteAnchor(long tick) {
+        this.pasteAnchorTick = Math.max(0, tick);
     }
 
     public void addNoteAt(Track track, long startTick, int pitch) {
@@ -1086,8 +1244,140 @@ public final class MidiDocumentView extends DocumentView {
                 }
             }
         }
+        Note follow = neighbourAfterDeletion(selected);
         selection().clear();
         commitMultiEdit("删除平行线");
+        // 选中框留在旁边的那一条，接着按方向键就从它继续
+        if (follow != null && trackOf(follow) != null) {
+            selection().setSingle(follow);
+        }
+    }
+
+    /** 这条平行线现在在哪个音轨里（找不到返回 null）。 */
+    private Track trackOf(Note note) {
+        for (Track track : document().tracks()) {
+            if (track.noteById(note.id()) != null) {
+                return track;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 删除后选中框该停在哪：优先取被删区域之后的最近一条（同一条音轨、跳过休止符），
+     * 没有就取之前的最后一条。这样接着按方向键是从旁边继续，而不是从文档开头重来。
+     */
+    private Note neighbourAfterDeletion(List<Note> deleted) {
+        Track track = activeTrack;
+        if (track == null || deleted.isEmpty()) {
+            return null;
+        }
+        long minStart = Long.MAX_VALUE;
+        long maxEnd = 0;
+        for (Note note : deleted) {
+            minStart = Math.min(minStart, note.startTick());
+            maxEnd = Math.max(maxEnd, note.endTick());
+        }
+        for (Note note : track.notes()) {
+            if (!note.isRest() && note.startTick() >= maxEnd) {
+                return note;
+            }
+        }
+        Note before = null;
+        for (Note note : track.notes()) {
+            if (!note.isRest() && note.endTick() <= minStart) {
+                before = note;
+            }
+        }
+        return before;
+    }
+
+    /**
+     * 输入模式下的 Backspace / Delete：从光标起按网格一格一格地删。
+     *
+     * @param direction -1 = Backspace：删光标左边一格，删完光标左移一格；
+     *                  1 = Delete：删光标右边一格，光标不动
+     */
+    public void deleteInputStep(int direction) {
+        Track track = activeTrack;
+        if (!inputMode || track == null) {
+            return;
+        }
+        long unit = Math.max(1, gridStepTicks());
+        long from = direction < 0 ? Math.max(0, inputCursorTick - unit) : inputCursorTick;
+        long to = from + unit;
+        int pitch = inputCursorPitch;
+        boolean[] changed = { false };
+        edit(track, direction < 0 ? "向后删除一格" : "向前删除一格", () -> {
+            changed[0] = eraseRange(track, from, to);
+            if (changed[0]) {
+                track.sortNotes();
+                reflowLocks(java.util.List.of(track));
+            }
+        });
+        if (changed[0] && direction < 0) {
+            moveCursorTo(from, pitch);
+        }
+    }
+
+    /**
+     * 把 [from,to) 这一格里的一切抹掉：完全命中的整条删掉，跨过边界的裁剪，
+     * 横跨两边的拆成两段（头段保留原 id，尾段用新 id）。返回是否有改动。
+     */
+    private static boolean eraseRange(Track track, long from, long to) {
+        List<Note> remove = new ArrayList<>();
+        List<Note> tails = new ArrayList<>();
+        Map<UUID, UUID> retarget = new LinkedHashMap<>();
+        boolean touched = false;
+        for (Note note : List.copyOf(track.notes())) {
+            long start = note.startTick();
+            long end = note.endTick();
+            if (end <= from || start >= to) {
+                continue;
+            }
+            touched = true;
+            boolean keepLeft = start < from;
+            boolean keepRight = end > to;
+            if (!keepLeft && !keepRight) {
+                remove.add(note);
+            } else if (keepLeft && keepRight) {
+                note.setDurationTicks(from - start);
+                Note tail = note.copyWithNewId();
+                tail.setStartTick(to);
+                tail.setDurationTicks(end - to);
+                tail.setLockLeaderId(null);
+                tails.add(tail);
+                retarget.put(note.id(), tail.id());
+            } else if (keepLeft) {
+                note.setDurationTicks(from - start);
+            } else {
+                note.setStartTick(to);
+                note.setDurationTicks(end - to);
+            }
+        }
+        if (!touched) {
+            return false;
+        }
+        track.notes().removeAll(remove);
+        for (Note tail : tails) {
+            track.addNote(tail);
+        }
+        java.util.Set<UUID> gone = new java.util.HashSet<>();
+        for (Note note : remove) {
+            gone.add(note.id());
+        }
+        for (Note note : track.notes()) {
+            UUID leader = note.lockLeaderId();
+            if (leader == null) {
+                continue;
+            }
+            if (gone.contains(leader)) {
+                note.setLockLeaderId(null);
+            } else if (retarget.containsKey(leader)) {
+                note.setLockLeaderId(retarget.get(leader));
+            }
+        }
+        return true;
     }
 
     public void splitSelectedAt(long tick) {
@@ -1149,6 +1439,7 @@ public final class MidiDocumentView extends DocumentView {
         beginMultiEdit(tracks);
         if (rippleSelection(tracks, deltaTicks)) {
             commitMultiEdit("移动休止符");
+            scrollSelectionIntoView();
             return;
         }
         for (Track track : tracks) {
@@ -1165,6 +1456,18 @@ public final class MidiDocumentView extends DocumentView {
             track.sortNotes();
         }
         commitMultiEdit("移动平行线");
+        scrollSelectionIntoView();
+    }
+
+    /** 键盘移动之后把选中项滚进可视区（用它自己的起点作为锚点）。 */
+    private void scrollSelectionIntoView() {
+        long first = Long.MAX_VALUE;
+        for (Note note : selection().resolve(document())) {
+            first = Math.min(first, note.startTick());
+        }
+        if (first != Long.MAX_VALUE) {
+            pianoRoll.scrollToTick(first);
+        }
     }
 
     /**
@@ -1173,7 +1476,7 @@ public final class MidiDocumentView extends DocumentView {
      *
      * <p>
      * 只在一个音轨内走位（活动音轨），休止符不参与（走过去没声音反而奇怪）；
-     * 当前没有选中时按播放头就近取一条。
+     * <b>当前没有选中时，任何方向键都先选中音轨里的第一条</b>，从它开始走。
      * </p>
      *
      * @param timeStep  -1 / 0 / 1：时间上前一条 / 不动 / 后一条
@@ -1189,9 +1492,15 @@ public final class MidiDocumentView extends DocumentView {
             return;
         }
         Note current = selectionAnchor(track);
-        Note target = timeStep != 0
-                ? neighbourInTime(candidates, current, timeStep)
-                : neighbourInPitch(candidates, current, pitchStep);
+        Note target;
+        if (current == null) {
+            // 什么都没选中：先落到第一条（按起点排序，第一个就是最早的）
+            target = candidates.get(0);
+        } else {
+            target = timeStep != 0
+                    ? neighbourInTime(candidates, current, timeStep)
+                    : neighbourInPitch(candidates, current, pitchStep);
+        }
         if (target == null || target == current) {
             return;
         }
@@ -1199,6 +1508,14 @@ public final class MidiDocumentView extends DocumentView {
         pianoRoll.scrollToTick(target.startTick());
         auditionNote(track, target);
         pianoRoll.canvas().repaint();
+    }
+
+    /** Esc：取消所有选中（输入模式下 Esc 仍然用来退出输入模式）。 */
+    public void clearSelection() {
+        if (!selection().isEmpty()) {
+            selection().clear();
+            pianoRoll.canvas().repaint();
+        }
     }
 
     /** 音轨里能发声的平行线（休止符不参与方向键走位）。 */
@@ -1463,11 +1780,15 @@ public final class MidiDocumentView extends DocumentView {
         if (track == null || app().clipboard().isEmpty()) {
             return;
         }
-        long start = grid.snap(playheadTick, document().ppq());
+        // 落点 = 上一次点击频谱的位置（没点过才退回播放头）；音高保持剪贴板原样，不跟着点击处平移
+        long anchor = pasteAnchorTick >= 0 ? pasteAnchorTick : playheadTick;
+        long start = grid.snap(Math.max(0, anchor), document().ppq());
+        List<NoteClipboard.Item> items = app().clipboard().items();
         List<Note> created = new ArrayList<>();
         edit(track, "粘贴平行线", () -> {
-            for (NoteClipboard.Item item : app().clipboard().items()) {
-                Note note = new Note(item.pitch(), start + item.startOffset(), item.duration(), item.velocity(),
+            for (NoteClipboard.Item item : items) {
+                int pitch = Math.max(0, Math.min(127, item.pitch()));
+                Note note = new Note(pitch, start + item.startOffset(), item.duration(), item.velocity(),
                         item.rest());
                 track.addNote(note);
                 created.add(note);

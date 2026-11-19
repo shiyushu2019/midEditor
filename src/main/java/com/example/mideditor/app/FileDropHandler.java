@@ -64,7 +64,7 @@ final class FileDropHandler extends TransferHandler {
         if (midi.isEmpty()) {
             if (candidates != null && !candidates.isEmpty()) {
                 JOptionPane.showMessageDialog(app.mainFrame(),
-                        "只能拖入 MIDI 文件（" + String.join(" / ", MIDI_EXTENSIONS) + "）。",
+                        "请拖入 MIDI 文件（" + String.join(" / ", MIDI_EXTENSIONS) + "）。",
                         "无法打开", JOptionPane.WARNING_MESSAGE);
             }
             return 0;

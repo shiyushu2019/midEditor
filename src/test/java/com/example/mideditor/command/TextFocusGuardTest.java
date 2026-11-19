@@ -38,4 +38,22 @@ class TextFocusGuardTest {
         assertFalse(TextFocusGuard.shouldBlock(true, new JPanel()), "焦点不在文本控件就不该挡");
         assertFalse(TextFocusGuard.shouldBlock(true, null), "没有焦点也不该挡");
     }
+
+    /**
+     * F1–F12 不可能往文本框里插字符：用户在 BPM 框里改完速度直接按 F5，
+     * 以前会被当成“正在打字”挡掉 —— 这就是「调完 bpm 后 F5 失效」。
+     */
+    @Test
+    void functionKeysAreNeverTreatedAsTyping() {
+        assertFalse(TextFocusGuard.shouldBlock(true, java.awt.event.KeyEvent.VK_F5, new JSpinner()),
+                "F5 不是文字输入，焦点在 BPM 框里也要能播放");
+        assertFalse(TextFocusGuard.shouldBlock(true, java.awt.event.KeyEvent.VK_F4, new JTextField()),
+                "F4（停止）同理");
+        assertFalse(TextFocusGuard.shouldBlock(true, java.awt.event.KeyEvent.VK_F6, new JComboBox<String>()),
+                "F6（回到开头）同理");
+        assertTrue(TextFocusGuard.shouldBlock(true, java.awt.event.KeyEvent.VK_SPACE, new JTextField()),
+                "空格仍然是文字输入，必须让位");
+        assertTrue(TextFocusGuard.shouldBlock(true, java.awt.event.KeyEvent.VK_DELETE, new JTextField()),
+                "Delete 也是文字编辑，必须让位");
+    }
 }

@@ -25,7 +25,7 @@ public final class ToolPanels {
         register(app, dock, DockIds.GRID, "网格设置", new InspectPanels.GridPanel(app),
                 DockManager.Region.RIGHT, false);
         register(app, dock, DockIds.DIAGNOSTICS, "诊断", new InspectPanels.DiagnosticsPanel(app),
-                DockManager.Region.BOTTOM, true);
+                DockManager.Region.BOTTOM, false);
         register(app, dock, DockIds.OUTPUT, "输出", new InspectPanels.OutputPanel(),
                 DockManager.Region.BOTTOM, false);
     }

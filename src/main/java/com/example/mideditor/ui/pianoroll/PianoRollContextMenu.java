@@ -26,10 +26,8 @@ final class PianoRollContextMenu {
         JPopupMenu menu = new JPopupMenu();
 
         if (hit.onNote()) {
-            JMenuItem title = new JMenuItem("平行线");
-            title.setEnabled(false);
-            menu.add(title);
-            menu.addSeparator();
+            menu.add(registry.action(AppCommandIds.EDIT_CUT));
+            menu.add(registry.action(AppCommandIds.EDIT_COPY));
             menu.add(registry.action(AppCommandIds.NOTE_DELETE));
             menu.add(registry.action(AppCommandIds.NOTE_SPLIT));
             menu.addSeparator();
@@ -37,19 +35,19 @@ final class PianoRollContextMenu {
             menu.add(registry.action(AppCommandIds.NOTE_UNLOCK));
             menu.addSeparator();
 
-            JMenu move = new JMenu("移动平行线");
+            JMenu move = new JMenu("移动");
             move.add(registry.action(AppCommandIds.NOTE_MOVE_UP));
             move.add(registry.action(AppCommandIds.NOTE_MOVE_DOWN));
             move.add(registry.action(AppCommandIds.NOTE_MOVE_LEFT));
             move.add(registry.action(AppCommandIds.NOTE_MOVE_RIGHT));
             menu.add(move);
 
-            JMenu length = new JMenu("平行线长度");
+            JMenu length = new JMenu("长度");
             length.add(registry.action(AppCommandIds.NOTE_LENGTHEN));
             length.add(registry.action(AppCommandIds.NOTE_SHORTEN));
             menu.add(length);
 
-            JMenu velocity = new JMenu("平行线力度（粗细）");
+            JMenu velocity = new JMenu("力度");
             velocity.add(registry.action(AppCommandIds.EDIT_VELOCITY_UP));
             velocity.add(registry.action(AppCommandIds.EDIT_VELOCITY_DOWN));
             menu.add(velocity);
@@ -57,16 +55,11 @@ final class PianoRollContextMenu {
             menu.add(pitchAxisMenu(registry));
 
             menu.addSeparator();
-            menu.add(registry.action(AppCommandIds.EDIT_CUT));
-            menu.add(registry.action(AppCommandIds.EDIT_COPY));
             menu.add(registry.action(AppCommandIds.EDIT_QUANTIZE));
         } else {
-            JMenuItem title = new JMenuItem("坐标空白处");
-            title.setEnabled(false);
-            menu.add(title);
-            menu.addSeparator();
             menu.add(registry.action(AppCommandIds.NOTE_ADD));
             menu.add(noteLengthMenu(host));
+            menu.addSeparator();
             menu.add(registry.action(AppCommandIds.REST_INSERT));
             menu.add(registry.action(AppCommandIds.REST_DELETE));
             menu.addSeparator();
@@ -78,9 +71,9 @@ final class PianoRollContextMenu {
         menu.show(canvas, point.x, point.y);
     }
 
-    /** 频率轴：滚轮可在键盘标尺 / 画布上缩放、滑动音域。 */
+    /** 音域：缩放、适配、显示全部。 */
     private static JMenu pitchAxisMenu(com.example.mideditor.command.CommandRegistry registry) {
-        JMenu menu = new JMenu("频率轴（音域）");
+        JMenu menu = new JMenu("音域");
         menu.setFont(Theme.BASE_FONT);
         menu.add(registry.action(AppCommandIds.VIEW_PITCH_ZOOM_IN));
         menu.add(registry.action(AppCommandIds.VIEW_PITCH_ZOOM_OUT));
@@ -93,7 +86,7 @@ final class PianoRollContextMenu {
 
     /** 新建平行线默认长度（与「网格设置」面板同步）。 */
     private static JMenu noteLengthMenu(MidiDocumentView host) {
-        JMenu menu = new JMenu("新平行线默认长度");
+        JMenu menu = new JMenu("默认长度");
         menu.setFont(Theme.BASE_FONT);
         ButtonGroup group = new ButtonGroup();
         for (GridSettings.NoteLength length : GridSettings.NoteLength.values()) {
@@ -111,11 +104,11 @@ final class PianoRollContextMenu {
             menu.add(item);
         }
         menu.addSeparator();
-        JMenuItem custom = new JMenuItem("自定义 tick…");
+        JMenuItem custom = new JMenuItem("自定义…");
         custom.setFont(Theme.BASE_FONT);
         custom.addActionListener(e -> {
             String input = JOptionPane.showInputDialog(host,
-                    "新建平行线的默认长度（tick）", String.valueOf(host.grid().customNoteTicks()));
+                    "长度（tick）", String.valueOf(host.grid().customNoteTicks()));
             if (input == null) {
                 return;
             }

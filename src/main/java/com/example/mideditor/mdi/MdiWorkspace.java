@@ -180,7 +180,7 @@ public final class MdiWorkspace extends JDesktopPane {
 
             g2.setFont(getFont().deriveFont(Font.PLAIN, 13f));
             g2.setColor(new Color(0xFFFFFF));
-            String hint = "文件 → 新建 / 打开，创建 MDI 文档窗口（可同时打开多个）";
+            String hint = "文件 → 新建，或拖入 .mid 文件";
             int hintWidth = g2.getFontMetrics().stringWidth(hint);
             g2.drawString(hint, (getWidth() - hintWidth) / 2, getHeight() / 2 + 6);
         } finally {

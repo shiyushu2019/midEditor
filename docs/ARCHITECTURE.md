@@ -224,14 +224,19 @@ public interface DocumentEdit { String label(); void undo(); void redo(); boolea
 - 时长换算：松手时 `heldNanos → micros → tick`，用 `TempoMap.microsAtTick` / `tickAtMicros` 在光标 tick 处求逆（跨变速按段累加），**不吸附网格**——这就是「按住多久就是多久」。
 - 绘制：`PianoRollPainter.paintInputCursor`（红色圆点 + 极淡的 tick 竖线）；按住空格时再画一条半透明「幽灵条」，长度取 `pendingInputTicks()`，由 60 Hz 的 `uiTimer` 在按住期间逐帧刷新。圆点与竖线都按 tick 绝对定位，滚动时随内容平移，不会被位块拷贝成残影。
 - **节奏辅助（可选开关）**：`inputBeatSnap` 打开后，起点和时值都吸附到当前网格单位（`assistUnitTicks()` = `grid.step(ppq)`，网格关闭时退回一拍）。
-- **关键：按“敲击间隔”落点，而不是每条音各自取整**。只把每条音的起点四舍五入到最近网格线，会让“起点=上一次起点+上一次吸附后的长度”，只要敲的间隔和按住时长不一致，后面每个音就会系统性地偏移。现在的做法：第一次按下时记锚点 `(assistAnchorNanos, assistAnchorTick)`，之后每次按下用 `microsToTicks(距锚点的真实时间)` 算出应该落在哪个 tick，再贴网格——所以敲四分就落四分、敲八分就落八分，不会被上一条音的取整误差带偏。
-  - 锚点失效条件：手动 A/D 移光标、切换轨道、进出输入模式、开关辅助、撤销/重做、以及**停顿超过 1.5s**（`PAUSE_REANCHOR_NANOS`）——重新锚定到光标处，避免“走开一会儿回来，音被摆到三秒之后”。
+- **关键：时值吸附网格，但起点绝不由「敲击间隔」推导**。v1.15/v1.16 曾经按两次按键的间隔生成休止符（`glueToPreviousInput` / `alignWithPreviousInput`），已被 v1.17 整体推翻：现在 `endInputNote` 只做两件事——起点取按下时的光标（光标本来就在上一条末尾，于是天然首尾相接；只有手动 A/D 挪开过才 `snapTickToAssistUnit`），时值 `snapDurationToAssistUnit` 吸附到整数格。**输入模式永远不会因为间隔而插休止符**。
+- **小键盘数字输入（v1.22）**：`beginInputDegreeNote(degree)` 把光标切到「当前八度 C + C 大调音阶第 degree 级」（`DEGREE_SEMITONES = {0,2,4,5,7,9,11}`），然后直接复用 `beginInputNote(pitch, sourceKey)` —— 按下即开始计时、松手即 `endInputNote`，和空格完全同一条收尾路径。
+  - **八度偏移 `inputOctaveJump`**：小键盘 `+` / `-`（`VK_ADD` / `VK_SUBTRACT`）±1，夹在 ±9；取音高时用的是「光标当前八度 + jump」。**每输入完一个音就归零**（在 `endInputNote` / `abortInputNote` 里清），不留给下一条。`degreePitch()` 是纯函数（static，包内可见），测试直接断言音高。
+  - **按住大键盘 `+`/`=` 或 `-`/`_`（v1.22 补充）**：`inputOctaveHold` 记 ±1（松开回 0），它是<b>物理按键状态</b>，所以按住期间连敲多个数字都有效；取音高时参与 `shift = inputOctaveJump + inputOctaveHold * octaveScale`，`octaveScale` 由按键事件里是否带 Ctrl 决定（1 或 2）——所以 `Ctrl + = + 数字` = 高两个八度，`Ctrl + - + 数字` = 低两个八度。`InputModeDispatcher` 的修饰键放行条件也因此从“任何 Ctrl 都放行给命令系统”改成“Alt/Meta 一律放过，Ctrl 只放行小键盘 1~7 与 `VK_EQUALS`/`VK_MINUS`”（`Ctrl+Space` 停止等仍归命令系统）。
+  - **Ctrl+U / Ctrl+L = 光标整八度**：`moveInputCursor(0, ±12)`，只挪光标（音高窗口跟着翻），不出音符、不动时间；只认「纯 Ctrl+U/L」（`SHIFT_DOWN_MASK` 不算），所以 `Ctrl+Shift+L`（循环域＝选区）仍归命令系统。注意 `Ctrl+L` 本身是「循环播放」的快捷键，输入模式下会先被 `InputModeDispatcher` 吃掉。
+  - **刚输入的那条就是选中项**：`endInputNote` 末尾 `selection().setSingle(created)`——只换选中、不累加，也不影响 Esc 退出 / Esc 取消选中 / 删完选邻居这些既有规则（`DocumentSelection` 按 id 存，撤销后旧 id 解析为空自然失效）。
+  - **空格与小键盘互不打断**：`inputNoteKey` 记下这条音是哪个键按下的，松手走 `endInputNoteFromKey(keyCode)`，键对不上就不收尾（两套输入并存时不会互相提前结束）。
   - 时钟可注入：`setNanoClockForTesting(LongSupplier)`（包内可见），测试可以精确控制“按了多久 / 隔了多久”。
-  - 入口：工具栏第二个开关 + 编辑菜单勾选项；`InputModeTest` 里用假时钟验证“断奏每 480ms 敲一下 → 落点 0/480/960”。
+  - 入口：工具栏第二个开关 + 编辑菜单勾选项。
 - **光标可以翻动频谱**：`moveCursorTo` 不再把音高夹在可见音域内，而是 `scrollPitchWindowToCursor(track)` —— 光标越过窗口上/下边界时 `Track.shiftPitchRange()` 把窗口推过去（行数不变），再刷新键盘标尺与音轨头；切轨 / 重新进入输入模式时同样把新窗口翻到光标处。
 - 入口：工具栏 `JToggleButton`（选中态跟随命令）+ 编辑菜单勾选项 + `Ctrl+I`。
 - **撤销 / 重做要带上光标**：`endInputNote` 往 `inputSteps` 里压一条 `(track, noteId, beforeTick/Pitch, afterTick/Pitch)`；`MidiDocumentView.undo()` / `redo()`（命令层只调这两个）事后检查栈顶那条音符是否还在 —— 被撤销就退到 `before` 并压入 `undoneInputSteps`，被重做就退栈并跳到 `after`。别的编辑不会动光标。
-- 回归测试 `InputModeTest`（17 项）+ `InputPreviewSoundTest`（1 项，假 Receiver 验证 NOTE_ON/NOTE_OFF 与 `activeNoteCount`）。
+- 回归测试 `InputModeTest`（29 项）+ `InputPreviewSoundTest`（1 项，假 Receiver 验证 NOTE_ON/NOTE_OFF 与 `activeNoteCount`）。
 - **Q 是“按住一个音到底”**：`beginInputAudition()/endInputAudition()` 成对发 note-on/off，自动重复的 KEY_PRESSED 被 `inputAuditionHeld` 拦住；早期用 `audition(…, 220ms)` + 自动重复，听感是“一个音被反复敲”。
 
 ## 5. 播放调度方案
@@ -461,7 +466,7 @@ public interface DocumentEdit { String label(); void undo(); void redo(); boolea
 ### v1.11 迷你左栏、F5 播放键、Ctrl+I 三态循环
 
 - **左侧工具窗口缩成迷你**：`DockManager` 不再写死 250，改在 `doLayout()` 里 `applyMiniLeftWidth()`——宽度取窗口的 1/4，再夹到 `[MINI_LEFT_MIN=120, MINI_LEFT_MAX=160]`（纯 1/4 在 1200px 窗口上是 300、在 400px 上是 100，两头都不好用）。配套把 `DockPanel` 的「浮/×」按钮 margin 归零（22px 才装得下单个汉字），`TracksPanel` 的四个按钮由「添加 删除 上移 下移」改成 `＋ － ▲ ▼` + tooltip，否则 160px 一行放不下会折行。
-- **播放键**：`PLAY_PLAY_PAUSE` 主键 空格 → **F5**、`PLAY_STOP` Ctrl+空格 → **Ctrl+F5**、`PLAY_REWIND` Ctrl+Home → **F6**；旧键用 `CommandRegistry.bindAlias` 保留为备用（`CommandRoutingTest` 里断言过空格仍然映射到播放，别名不破坏它）。
+- **播放键**：`PLAY_PLAY_PAUSE` 主键 空格 → **F5**、`PLAY_STOP` Ctrl+空格 → **F4**（v1.20 改：原本是 Ctrl+F5，被用户报告为“按了却变成堆叠窗口”，旧键已彻底解绑）、`PLAY_REWIND` Ctrl+Home → **F6**；旧键用 `CommandRegistry.bindAlias` 保留为备用（`CommandRoutingTest` 里断言过空格仍然映射到播放，别名不破坏它）。
 - **Ctrl+I 三态循环**（`EditCommands` 的 `EDIT_INPUT_MODE` 处理器）：`关 → 输入模式＋节奏辅助 → 输入模式（无辅助） → 关`。第一下就落到「带辅助」那档，第二下只关辅助（光标还在），第三下退出。`setInputMode` 本身不动 `inputBeatSnap`，所以「先开模式再开辅助」不会互相覆盖。
 - 新增 `DockMiniWidthTest` 3 项（1200→160、400→120、1600→160）与 `ShortcutReworkTest` 2 项（F5/Ctrl+F5/F6 绑定与空格别名、三次按键的状态序列），测试总计 125 项。
 
@@ -491,3 +496,167 @@ public interface DocumentEdit { String label(); void undo(); void redo(); boolea
 - 常量改名 `LEGACY_RANGE_MARKER`，只用于 `collectForeignMeta()` 把旧文件里的这条标记**丢掉**，否则它会被当“外来 meta”永远搬运下去。
 
 回归：`FreshInstanceStateTest`（实例 A 改 150 BPM / 60 行 → 关掉 → 实例 B 新建文档必须是 60 BPM + 默认行数）、`MidiFileCodecTest.roundTripKeepsMusicButNotTheViewRange`（乐曲事件全保真、音域按内容重算、文件里不许再有该标记），测试总计 133 项。
+
+### v1.14 音轨信息面板缩到 1/3、钢琴标尺缩到 1/2
+
+`Theme.HEADER_WIDTH` 244 → **81**（三分之一），`Theme.PITCH_STRIP_WIDTH` 46 → **23**（一半）。单纯改常量会把行头里的控件全裁掉，所以 `TrackHeaderRow` 一并重排：
+
+- 原来 5 行固定宽控件（名字 120、音量/声像滑块各 150、乐器下拉、四个按钮 + 音域读数）在 81px 里放不下（FlowLayout 会折行、滑块被切），改成 8 行紧凑布局，控件宽度统一按 `inner = HEADER_WIDTH - 8` 算：
+  - 第 1 行：`BorderLayout`——颜色块（12px）在 WEST，名称框在 CENTER（`inner-18` 宽）；
+  - 第 2 行：乐器下拉占满一整行（文字会被截断，但 tooltip + 每帧刷新照旧）；
+  - 第 3/4 行：音量、声像滑块各占一整行（去掉「音量 / 声像」文字标签，改 tooltip，省下来的横向空间给滑块）；
+  - 第 5/6/7 行：`GridLayout(1,2)` 的 `M|S`、`▲|▼`（音域上下移）、`＋|－`（音域缩放）；
+  - 第 8 行：音域读数（如 `45-74 · 30行`）。
+- 泳道高度 240px 足够放这 8 行（约 150px），底部留白由 `Box.createVerticalGlue()` 吸收。
+- 钢琴标尺：`C4` 这类标注右对齐位置从 `width-6` 改成 `width-2`，23px 下才不会被切；黑键/白键仍是整行铺满色块，缩窄不影响识别。
+- 两个常量只被 `PianoRollView.relayout()` 用来算 `rowHeaderWidth = HEADER_WIDTH + PITCH_STRIP_WIDTH`，所以标尺、行头、画布的横向对齐是同一处算出来的，不会错位。
+
+### v1.15 节奏辅助的连奏缝隙 + 底部改成 Word 式单行状态栏
+
+**一、按住 3 秒、松开、再按住 3 秒，中间被插了休止符**
+
+根因是两条各自独立取整：`endInputNote` 里上一条的**时长**走 `snapDurationToAssistUnit`（`round(hold / unit)`），下一条的**起点**走 `snapTickToAssistUnit(anchorTick + microsToTicks(敲击间隔))`（也是 round）。两次 round 的输入只差「松开到再按」的那点人工间隔，只要它把比值推过 .5，起点就比上一条的末尾多出一整格 → `reconcileRests` 忠实地把那格缝实体化成休止符。
+
+修法（`MidiDocumentView.alignWithPreviousInput`，取代最初的 `glueToPreviousInput`）：记住**上一回松手的时刻**（`previousReleaseNanos`，在覆盖 `lastInputReleaseNanos` 之前抓一份）与上一条输入的 id（`lastInputNoteId`），落新音时在同一个编辑事务里做三件事：
+
+1. **不重叠**：起点落进上一条里 → 上一条裁到这个起点（保节奏）；起点跟上一条完全相同（粗网格下两次敲击取整到同一 tick）→ 新音接在上一条末尾；
+2. **连奏**：量化后的缝 ≤ 两格、且“上一回松手 → 这一回按下” **≤ 600ms** → 上一条拉长到新起点（只拉长前一条，不动新音的起点，敲击节奏不被改）；
+   > ⚠ 这条判据的「缝 ≤ 两格」在 v1.16 被删掉了（细网格下它把容差压到 250ms），改成「间隔 ≤ max(600ms, 上一条音长的一半)」。
+3. 停得够久（> 600ms 或缝 > 两格）就不动，休止符正常出现。
+
+> 第一版判据是“静音 ≤ max(半格, 200ms)”，用户实测仍然会插休止符（250–300ms 的双击就超了），所以改成上面的“两格 + 600ms”；另外审计测试发现了第二个更隐蔽的 bug：**粗网格下两次敲击被取整到同一个 tick**，第二条音直接叠在第一条上（`音[0..480] 音[0..960]`），现在由第 1 条规则推到上一条末尾。
+
+- `lastInputNoteId` 在手动 A/D 移光标、进出模式、开关节奏辅助、撤销/重做时清空（`noteById` 查不到也会自动跳过）；输入落点后还调一次 `reflowLocks()`，免得被拉长的上一条把它锁着的同伴丢在后面。
+- 回归：`InputModeTest.backToBackPressesStayConnectedUnderAssist`（2.9s + 150ms + 2.9s → 相邻无休止）、`aRealPauseStillLeavesARest`（1s 停顿仍保留休止）、`doubleTapStaysConnectedAcrossTypicalSpeeds`（按住 300/900/3000ms × 间隔 0/60/150/250/400ms 共 15 组 → 必须首尾相连）、`assistNeverLeavesSliverRestsOrOverlaps`（**不变量审计**：1/4、1/8、1/16、1/8 三连音四档网格各敲一串长短不一的节奏 → 不许出现“小于一格”的休止符，也不许两条平行线重叠）。
+
+**二、底部「诊断」栏改成 Word 式单行状态栏**
+
+- `ToolPanels` 里 `DIAGNOSTICS` 默认 `visible=false`（仍在视图菜单里，需要时调出），底部那块高大的停靠区默认不再出现。
+- `StatusBar` 重写成 `BorderLayout` 的两段：**WEST = 状态文字**（平时绿字「就绪」，`setMessage` 的临时提示占位并用 `Timer` 4 秒后自动回到就绪）、**CENTER = 右对齐的信息行**（文档 · 音轨 · tick/时间 · 缩放 · N 音轨 · M 平行线 · PPQ · 已保存/未保存 · 音频就绪/不可用）。高度 24 → **20px**，字号用 `SMALL_FONT`。
+- `MainFrame.updateStatus` 改为调用新的 `statusBar.setInfo(...)`（原来是用 `setMessage` 塞一长串，会和临时提示互相覆盖）。
+- 测试：`statusBar.stateText()` / `infoText()` 暴露给测试（新增用例 2 项），总计 **135 项**。
+
+### v1.15 补：状态栏“看不见”其实是窗口比桌面还高
+
+用户反馈「底部怎么看不见任何东西」。排查结论：状态栏画得好好的（离屏 `printAll` 能看到“就绪”），问题在**窗口尺寸**——`MainFrame` 里写死 `setSize(1440, 920)` 再 `setLocationRelativeTo(null)`，本机可用桌面只有 **1440×852**（1440×900 屏减掉任务栏），于是窗口纵向被居中到 `y = -10`，**底部 58px 落在可用区域之外**（压在任务栏后面）。以前底部有一块 ≥180px 的“诊断”停靠区顶着，所以没人发现；把诊断默认收起后，可见区域的下边缘正好是传输条，那一行 20px 状态栏就整条被挡掉了 —— 看起来像“底部什么都没有”。
+
+修法（`MainFrame` 构造函数）：一律按 `GraphicsEnvironment.getMaximumWindowBounds()` 定尺寸与位置——
+`width = min(1440, usable.width)`、`height = min(920, usable.height)`，左上角取 `usable.x/y` 居中（不小于 0），`setMinimumSize` 也夹到可用桌面之内。这样无论屏幕多大，状态栏都完整落在任务栏之上。
+回归：`WindowFitsScreenTest`（断言 `usable.contains(frame.getBounds())`），测试总计 **136 项**。
+
+**顺带：默认最大化。** 用户接着问「为什么不是最大化而是堆叠但布满屏幕」。原因是之前只用 `setSize` 把窗口撑到 1440×852（恰好等于可用桌面），但那只是“一个很大的普通窗口”：没有最大化状态、标题栏按钮还是“最大化”图标、别人一切窗口就现原形。现在 `MainFrame` 构造末尾就 `setExtendedState(getExtendedState() | MAXIMIZED_BOTH)`，`MidiEditorApp` 在 `setVisible(true)` 之后再确认一次（有些 WM 会在 show 时清掉 show 之前设的扩展状态）。实测：`getExtendedState()==6`（MAXIMIZED_BOTH），状态栏屏幕坐标 `y=832..852`，正好压到可用桌面底边，不会被任务栏挡。`WindowFitsScreenTest` 里额外断言了最大化状态。
+
+### v1.16 连奏容差改为「跟着音长走」（第三次报同一个 bug）
+
+用户第三次报「在同一个音高按两下，中间还是加很长的休止符」（第一次是 `按住3s → 松开 → 再按住3s`）。用探针把 60BPM 下 7 档网格 × 4 种按住时长 × 15 种间隔全部跑了一遍，才看清 v1.15 那条规则的实际边界：
+
+> `legato = gap ≤ 2 × unit 且 silence ≤ 600ms` —— 两个条件取**与**，所以真实容差是 `min(600ms, 2×unit)`。
+
+1. **细网格被两格卡死**：`2 × unit` 在 1/32 网格下只有 250ms、在 1/16 + 120BPM 下也只有 250ms。人手的「松开 → 再按」轻松就超了 → 每档网格都在 300–400ms 间隔处开始冒休止符。
+2. **长音之后有死区**：连奏阈值 600ms，而 `PAUSE_REANCHOR_NANOS` 是 1.5s，中间 0.6–1.5s 这段停顿既不算连奏、又没触发重新锚定 → 按住 3 秒的音再按下去，中间被塞进一整条与停顿等长的休止符（探针表里 `1/16 hold=3000ms` 行：间隔 ≥ 700ms 就开始出现）。
+
+修法（`MidiDocumentView.alignWithPreviousInput` / 新增 `legatoToleranceMicros`）：
+
+- 容差改为 `max(600ms, 上一条音长 ÷ 2)`：长音之后按「音长的一半」放宽，短音仍用 600ms；
+- **去掉「缝 ≤ 两格」这个条件**。它本来就是 `silence` 的近似（`gap = silence + 两次取整误差`，误差 ≤ 半格），保留它只会让细网格的容差莫名其妙地变小；
+- 间隔超过容差才算真停顿，休止符照常由 `reconcileRests` 实体化；`> 1.5s` 仍然重新锚定到光标处。
+
+探针复测（60BPM）：`hold=3000ms` 在 1/4、1/8、1/16 三档网格上、间隔 0–2000ms 全部 `--`（无休止符）；`hold=300ms` 仍然在 700ms 之后正常出现休止。
+
+回归：`InputModeTest.longHeldNotesStayConnectedWhateverThePause`（3 秒音 × 1/4、1/16、1/32 × 间隔 0/200/400/600/800/1100/1400ms → 必须相邻且无休止）、`InputModeTest.fineGridDoesNotSplitQuickDoubleTapsWithRests`（1/32 网格按住 200ms、间隔 300/400/500/600ms → 必须相邻）、`aRealPauseStillLeavesARest` 改成「短促音（300ms）+ 1 秒停顿」（原来用 2.9 秒长音，把连奏规矩写反了）。测试总计 **140 项**。
+
+> ⚠ **v1.16 这一版仍然是错的**（v1.17 已整体推翻）：它继续把“两次按键之间的间隔”拿去和休止符比较，只是把阈值调宽了一点。用户的原话是「我他妈没叫你做这个」——输入模式从一开始就**没有**“按间隔插休止符”这个需求。
+
+### v1.17 输入模式不再碰休止符：新音直接接在上一条末尾
+
+**用户的第三、四次反馈**：「同一个音高按两下，第二次不但前面冒出休止符，而且比实际按空格的时间长」。追问确认后定性：**输入模式从来不该按“两次按空格的间隔”生成休止符**——那是我自己加的规则（v1.15 的 `glueToPreviousInput` → v1.16 的 `alignWithPreviousInput`），需求里没有。
+
+现在的模型（`MidiDocumentView.endInputNote`）：
+
+1. **位置**：取按下那一刻的光标（`inputNoteStartTick`）。每输入完一条，光标就停在它的末尾（`moveCursorTo(created.endTick())`），所以下一次按下自然就落在上一条末尾 —— **连续输入天然首尾相接，间隔多长都不影响位置**。
+2. **时值**：`heldNanosToTicks(按住时长)`，**不再做网格取整**。`snapDurationToAssistUnit` 已删除，因此不会出现“按 300ms 却落成一整格”的情况。
+3. **节奏辅助**只做一件事：手动 A/D 挪过光标后，落音起点吸附到当前网格（`snapTickToAssistUnit`，网格关闭时退回一拍）。光标仍停在上一条末尾时**不做吸附**（否则那点 <=半格的取整误差又会变成缝）。
+4. 想留空隙：用 A/D 把光标挪开再按（这是显式动作，`reconcileRests` 会把空隙实体化成休止符）。
+
+删掉的东西：`alignWithPreviousInput`、`legatoToleranceMicros`、`LEGATO_SILENCE_MICROS`、`snapDurationToAssistUnit`、`assistAnchored/assistAnchorNanos/assistAnchorTick/lastInputReleaseNanos/PAUSE_REANCHOR_NANOS`。
+
+保留的最小规则：光标被手动挪回上一条**里面**时，把上一条裁到新起点（防两条同音高重叠），仅此一条。
+
+回归（`InputModeTest`，22 项）：`staccatoPressesAppendWithoutAnyRests`（每次 100ms、间隔 380ms 敲三下 → 0/100/200 三条、长度都是 100 tick、无休止）、`assistSnapsTheStartButKeepsTheRealHoldLength`（起点吸附 1/8 网格，时值严格 = 按住时长）、`assistNeverInsertsRestsOrOverlaps`（四档网格 × 8 组长短节奏 → 文档里**不许出现任何休止符**、不许重叠）、`doubleTapStaysConnectedAcrossTypicalSpeeds`（15 组）、`longHeldNotesStayConnectedWhateverThePause`、`fineGridDoesNotSplitQuickDoubleTapsWithRests`、`aLongPauseDoesNotPushTheNextNoteAway`。`aRealPauseStillLeavesARest` 已删除（那条行为本身就不该存在）。测试总计 **139 项**。
+
+### v1.18 恢复“起点 + 时值”双重吸附（v1.17 删过头）
+
+切掉间隔逻辑时，我把 `snapDurationToAssistUnit` 一起删了，于是连续输入时既没有起点吸附、也没有时值吸附——用户立刻发现「我的辅助（吸附）去哪了」。
+
+现在两条规则并存：
+
+| | 行为 |
+| --- | --- |
+| **吸附**（节奏辅助开） | 起点吸附到网格（`snapTickToAssistUnit`）；时值 = `max(1, round(按住时长 / 网格))` 个网格（`snapDurationToAssistUnit`，已恢复）。连续输入时上一条末尾本来就落在网格上，所以新音直接接上去也依然对齐 |
+| **休止符** | 输入模式**永远不会**因为两次按键的间隔生成休止符；只有手动 A/D 把光标挪开再按，才会在中间留下（并被 `reconcileRests` 实体化成）休止符 |
+
+幽灵条（`pendingInputTicks`）恢复显示吸附后的长度，所见即所得。
+
+回归：`assistSnapsStartAndDurationToTheGrid`（起点与时值都是 1/8 的整数倍）、`staccatoPressesAppendWithoutAnyRests`（100ms 按住 → 一个八分音符，三条 0/240/480）、`assistNeverInsertsRestsOrOverlaps` 增加「起点/时值都必须是整数格」断言。测试总计 **139 项**。
+
+### v1.19 粘贴落点 / 框选自动滚 / 删完接着选 / 输入模式按格删 / 回到开头跟着滚
+
+五条交互修正，都是“用户手在哪儿，结果就在哪儿”：
+
+1. **粘贴落点 = 上一次点击频谱的位置**（MidiDocumentView.setPasteAnchor，由 PianoRollCanvas.mousePressed 在左键按下时调用）。paste() 用锚点 tick（吸附网格）作为起点、用锚点音高减去剪贴板第一项的音高得到整体音高平移；没点过才退回播放头。
+2. **框选自动滚动**（PianoRollCanvas.marqueeScroller）：框选时鼠标停在视口边缘 24px 内，就用 30ms 的 Swing Timer 持续滚动 24px/帧——因为鼠标贴边不动时 mouseDragged 不再触发，只用拖拽事件是滚不起来的。滚动后按“视口内坐标 + 新视图位置”重算画布坐标的框选矩形（utoScrollMarquee）。
+3. **Delete 之后选中框落到邻居**（deleteSelection + 
+eighbourAfterDeletion）：优先取被删区域之后最近的发声平行线，没有就取之前的最后一条；这样接着按方向键是从旁边继续，而不是清空后从文档开头重来。
+4. **输入模式 Backspace / Delete 按格删**（MidiDocumentView.deleteInputStep + eraseRange）：以光标为界，Backspace 删左边一格并左移光标，Delete 删右边一格。整条命中就删掉，跨边界就裁剪，横跨两边就拆两段（头段保留原 id、尾段 copyWithNewId，锁定引用跟着重指）。
+5. **回到开头时频谱也拉回开头**（PianoRollView.scrollToTimeStart）：
+rewind()（F6 / ⏮ 按钮）与 stopTransport()（F4 / ⏹ 按钮，它本来就把播放头归零）都调用，横向位置归 0、纵向不动。
+
+回归：InteractionFixesTest 6 项（粘贴落点与音高平移、删除后选中邻居、Delete/Backspace 按格删除与拆分、rewind 把视图拉回 x=0、框选贴左边自动向左滚）。测试总计 **145 项**。
+
+> 测试坑：没有真实窗口时 getViewRect() 恒为 0；滚动类断言必须先手动给视口和内容设尺寸（viewport.setSize(1000,700) + canvas.setSize(6000,800)），doLayout()/validate() 在非 displayable 的组件上不生效。
+
+### v1.20 WASD 移动自动跟随滚动 + 停止键改成 F4
+
+1. **WASD 移动选中平行线时频谱要跟着滚**：`moveSelection` 原来只改 tick 不碰视图，所以往右移出屏幕后要自己拖横向滚动条。现在编辑提交后统一调 `scrollSelectionIntoView()`（取选中项里最早的 `startTick`，交给 `PianoRollView.scrollToTick` —— 它本来只在超出“安全区”时才动视图，所以贴边自动跟随、屏幕内不会乱跳）；休止符 ripple 分支同样调用。
+2. **停止从 Ctrl+F5 改成 F4**：用户实测按 Ctrl+F5 后窗口变成层叠而不是停止（判断为快捷键冲突），所以 `PLAY_STOP` 主键改 `VK_F4`，并且**不再保留 Ctrl+F5 别名**（`ShortcutReworkTest` 新增断言：Ctrl+F5 在全局 InputMap 里必须没有绑定）。Ctrl+空格 仍作为停止的备用键。
+
+回归：`ShortcutReworkTest.playbackKeysAreF5F4AndF6`（F5 / F4 / F6 + “Ctrl+F5 无绑定”）。测试总计 **145 项**。
+
+### v1.21 Esc 取消所有选中 + 无选中时方向键先落第一条
+
+- **Esc = 取消选择**：新命令 `EDIT_DESELECT`（`edit.deselect`，`VK_ESCAPE`，`CommandScope.SELECTION` + `hasSelection`），执行 `MidiDocumentView.clearSelection()`；编辑菜单里也加了「取消选择」。输入模式下 Esc 先被 `InputModeDispatcher` 吃掉（退出输入模式），所以两种语义不会打架；`TextFocusGuard` 保证光标在文本框里时 Esc 不误清选区。
+  > ⚠ 只挂 `WHEN_IN_FOCUSED_WINDOW` 还不够：焦点在 MDI 子窗体（`JInternalFrame`）里时，Swing 解析到的是**子窗体自己的 JRootPane**，主窗口 root pane 上的键绑定不一定生效（用户实测按 Esc 没反应）。所以 Esc 同时由 `ArrowKeyDispatcher`（已注册的全局 `KeyEventDispatcher`）接管：不在输入模式且有选中就直接 `router.dispatch(EDIT_DESELECT)` 并 `consume()`，与焦点落在哪个控件无关。
+- **无选中时方向键先选中第一条**：`stepSelection` 原来在没有锚点时会按播放头就近取（播放头在 0 且音在右边时按 ← 什么都不会发生）。现在没有选中（或选中的全是休止符 / 别的音轨）时，任何方向键都直接选中活动音轨里**起点最早的那条**，之后照旧在相邻对象之间走位。
+
+回归：`InteractionFixesTest.escapeClearsTheWholeSelection`（Esc 真的绑在全局 InputMap 上 + 清空选区）、`arrowKeysPickTheFirstNoteWhenNothingIsSelected`（无选中时 →/↑ 都落到第一条，再按 → 走到第二条）。测试总计 **148 项**。
+
+### v1.22 输入模式加小键盘数字（简谱）+ 小键盘 +/- 挪八度
+
+第二套输入手法，和 `WASD + 空格` 并存：
+
+1. **小键盘 1~7 = 简谱 do/re/mi/fa/sol/la/si**（`InputModeDispatcher` → `MidiDocumentView.beginInputDegreeNote`）。按下就把光标切到这个音高并**立即开始输入**（不用再按空格），松手时按按住时长落成平行线；音高 = 光标所在八度的 C 往上数 C 大调音阶（`DEGREE_SEMITONES`），再夹到 0..127。
+2. **小键盘 + / - = 八度偏移 ±1**（`shiftInputOctaveJump`，夹在 ±9）。取音高用「当前八度 + jump」；**每输入完一个音 `inputOctaveJump` 归零**，不留给下一条，退出输入模式也归零。
+3. **松手只认自己按下的那个键**：`inputNoteKey` 记录来源（空格 / 小键盘数字），走 `endInputNoteFromKey()`；空格按着时敲数字不会把空格那条提前收尾，反之亦然。
+4. 其余行为（连奏接上一条末尾、节奏辅助吸附、幽灵条、撤销带光标）全部复用原有路径，没有第二份实现。
+
+回归：`InputModeTest.numpadDigitsEnterTheDegreeInTheCursorOctave`（1~7 落在同八度的 do..si、首尾相连、按住时长有效）、`numpadPlusMinusShiftTheOctaveAndResetAfterEachNote`（+ 两次 → 高两个八度；输完 jump 归零，下一条不再上移；`-` 降回来）、`holdingMainKeyboardPlusMinusShiftsTheNumpadOctave`（按住 `=`/`-` 时数字 ±1 八度且按住期间一直有效、松开失效；再按 Ctrl 则 ±2 八度）、`numpadAndSpaceInputsChainTogether`（两套输入接着往下写）、`ctrlUMovesTheCursorUpAnOctaveAndCtrlLDown`（±12 半音、不动时间、裸 U 与 Ctrl+Shift+L 都放行）、`everyInputNoteBecomesTheSelection`（空格/小键盘输入都只选中新落的那条、退出输入模式不清选中）、`numpadIsNotConsumedWhenInputModeIsOff`。测试总计 **155 项**。
+
+### v1.23 快捷键总表 + 帮助菜单入口
+
+- **单一来源**：所有快捷键整理在仓库的 `docs/SHORTCUTS.md`（文件 / 编辑 / 选中走位 / 长度四键 / 播放 / 视图缩放 / 输入模式 / 鼠标 / 已知冲突）。改键先改代码，再同步这份表。
+- **随程序打包**：`pom.xml` 的 `<build><resources>` 显式列出默认的 `src/main/resources`，并额外把 `docs` 下的 `SHORTCUTS.md` 复制到 class 路径根目录，所以 jar 里就有 `/SHORTCUTS.md`。
+- **帮助 → 快捷键**（`HELP_SHORTCUTS` / `help.shortcuts`）：`ui/frame/ShortcutDoc.materialize()` 每次把打包进去的那份解到 `%TEMP%\midEditor\midEditor-快捷键.md`（覆盖写），然后 `Desktop.getDesktop().open(...)` 交给系统默认程序；不支持或打不开时弹框把路径告诉用户。之所以不读工作目录下的 `docs/SHORTCUTS.md`：程序可能被拷到任意位置、以任意 cwd 启动，只有 jar 里那份保证与运行版本一致。
+- 回归：`ShortcutDocTest`（解得出且内容含 Ctrl+Z / F5 / F4 / 小键盘；帮助菜单里「快捷键」与「关于」都在）。测试总计 **157 项**。
+
+### v1.24 BPM 改完按 F5 失效 / 那次速度不生效 + 输入模式入场居中 + 粘贴不改音高
+
+用户报的三件事，后两件是需求变更：
+
+1. **改完 BPM 按 F5 没反应，而且那次改的速度不生效** —— 两个原因叠在一起：
+   - `JSpinner` 的编辑器只有在**回车或失去焦点**时才把文字提交到 model，而我们看的是 `bpmSpinner.getValue()`，所以「输入了 90 但没生效」。
+   - 焦点停在 spinner 的内部 `JFormattedTextField` 里时，`TextFocusGuard.isTextEditing()` 为真，`PLAY_PLAY_PAUSE` 处理器直接 `return` —— 表现就是 F5 完全失效。
+   - 修法：`TextFocusGuard` 增加“知道按了哪个键”的版本（`noteKeyboardEvent(KeyEvent)` + `shouldBlock(keyboardDriven, keyCode, focusOwner)`），**F1–F12 永远不算在打字**（功能键不可能插入字符），空格 / Delete 等仍然让位；`TransportBar.commitBpmEdit()`（`bpmSpinner.commitEdit()`，非法数字忽略）在**焦点离开**和 **`togglePlayPause()` 开头**各调一次，保证播放用的是刚输入的速度。
+2. **进入输入模式时光标放在当前可见频谱中央**：`setInputMode(true)` 不再用播放头，而是取 `pianoRoll.visibleRect()` 的中点——横向 `tickAtX(visible.x + visible.width/2)` 再吸附网格，纵向取活动音轨泳道的中间行（音域窗口正好铺满泳道，所以这就是“看到的那一段的中间”）；视口还没布局（宽高为 0）时退回播放头 / 原音高。
+3. **粘贴只跟随点击位置的时间，不再平移音高**：`paste()` 去掉 `pasteAnchorPitch - items.get(0).pitch()` 的整体移调，`setPasteAnchor(long tick)` 也不再带音高参数。
+
+回归：`TextFocusGuardTest.functionKeysAreNeverTreatedAsTyping`（F5/F4/F6 不挡、空格与 Delete 仍挡）、`BpmTempoTest.tempoTypedButNotCommittedIsAppliedBeforePlayback`（输入 90 不回车直接播放 → `tempoMap.bpmAt(0) == 90`）、`InputModeTest.enteringInputModePutsTheCursorInTheMiddleOfTheVisibleSpectrum`（滚到 900 与 3000 后再进都落在新视口中点，纵向是泳道中间行）、`InteractionFixesTest.pasteLandsWhereYouLastClicked`（落点 960、音高仍是 60）。测试总计 **160 项**。

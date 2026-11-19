@@ -246,17 +246,17 @@ final class InspectPanels {
         private final AppContext app;
         private final JComboBox<GridSettings.Resolution> resolutionBox = new JComboBox<>(
                 GridSettings.Resolution.values());
-        private final JCheckBox visibleBox = new JCheckBox("显示网格线");
+        private final JCheckBox visibleBox = new JCheckBox("显示网格");
         private final JCheckBox snapBox = new JCheckBox("吸附到网格");
-        private final JCheckBox keyboardRulerBox = new JCheckBox("显示键盘标尺");
-        private final JCheckBox cHighlightBox = new JCheckBox("Do（C）高亮");
+        private final JCheckBox keyboardRulerBox = new JCheckBox("键盘标尺");
+        private final JCheckBox cHighlightBox = new JCheckBox("C 高亮");
         private final JComboBox<GridSettings.NoteLength> noteLengthBox = new JComboBox<>(
                 GridSettings.NoteLength.values());
         private final JSpinner customTicksSpinner = new JSpinner(new SpinnerNumberModel(240, 1, 15360, 10));
         private final JSpinner pitchRowsSpinner = new JSpinner(new SpinnerNumberModel(
                 Track.VISIBLE_ROWS, Track.MIN_PITCH_ROWS, Track.MAX_PITCH_ROWS, 1));
         private final JCheckBox pitchAllTracksBox = new JCheckBox("应用到全部音轨");
-        private final JButton pitchFitButton = new JButton("适配本轨平行线");
+        private final JButton pitchFitButton = new JButton("适配平行线");
         private final JLabel stepLabel = caption("步长：-");
         private boolean updating;
 
@@ -266,13 +266,13 @@ final class InspectPanels {
             setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
             setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
             resolutionBox.setFont(Theme.SMALL_FONT);
-            resolutionBox.setToolTipText("网格分辨率：网格线间距、吸附单位与默认平行线长度的基准");
+            resolutionBox.setToolTipText("网格分辨率");
             visibleBox.setFont(Theme.SMALL_FONT);
             visibleBox.setOpaque(false);
-            visibleBox.setToolTipText("显示/隐藏纵向网格线（Ctrl+G）");
+            visibleBox.setToolTipText("显示网格（Ctrl+G）");
             snapBox.setFont(Theme.SMALL_FONT);
             snapBox.setOpaque(false);
-            snapBox.setToolTipText("新建与拖拽平行线时吸附到网格");
+            snapBox.setToolTipText("吸附到网格");
             resolutionBox.addActionListener(e -> {
                 if (updating) {
                     return;
@@ -307,7 +307,7 @@ final class InspectPanels {
 
             keyboardRulerBox.setFont(Theme.SMALL_FONT);
             keyboardRulerBox.setOpaque(false);
-            keyboardRulerBox.setToolTipText("显示左侧键盘标尺（Ctrl+K）");
+            keyboardRulerBox.setToolTipText("键盘标尺（Ctrl+K）");
             keyboardRulerBox.addActionListener(e -> {
                 if (updating) {
                     return;
@@ -321,7 +321,7 @@ final class InspectPanels {
 
             cHighlightBox.setFont(Theme.SMALL_FONT);
             cHighlightBox.setOpaque(false);
-            cHighlightBox.setToolTipText("把每个八度的起点（Do / C）在频谱和键盘标尺上高亮（Ctrl+Shift+K）");
+            cHighlightBox.setToolTipText("C 高亮（Ctrl+Shift+K）");
             cHighlightBox.addActionListener(e -> {
                 if (updating) {
                     return;
@@ -334,7 +334,7 @@ final class InspectPanels {
             });
 
             noteLengthBox.setFont(Theme.SMALL_FONT);
-            noteLengthBox.setToolTipText("在坐标空白处添加平行线时使用的默认长度");
+            noteLengthBox.setToolTipText("新平行线默认长度");
             noteLengthBox.addActionListener(e -> {
                 if (updating) {
                     return;
@@ -346,7 +346,7 @@ final class InspectPanels {
                 }
             });
             customTicksSpinner.setFont(Theme.SMALL_FONT);
-            customTicksSpinner.setToolTipText("自定义默认平行线长度（tick）");
+            customTicksSpinner.setToolTipText("长度（tick）");
             customTicksSpinner.addChangeListener(e -> {
                 if (updating) {
                     return;
@@ -380,7 +380,7 @@ final class InspectPanels {
             pitchRow.setOpaque(false);
             pitchRowsSpinner.setFont(Theme.SMALL_FONT);
             pitchRowsSpinner.setPreferredSize(new Dimension(72, 22));
-            pitchRowsSpinner.setToolTipText("行数越少：放大音域（每行更高）；128 = 全部音高");
+            pitchRowsSpinner.setToolTipText("可见半音数");
             pitchRowsSpinner.addChangeListener(e -> {
                 if (updating) {
                     return;
@@ -400,7 +400,7 @@ final class InspectPanels {
             add(pitchRow);
             pitchAllTracksBox.setFont(Theme.SMALL_FONT);
             pitchAllTracksBox.setOpaque(false);
-            pitchAllTracksBox.setToolTipText("把当前半音行数应用到文档内所有音轨");
+            pitchAllTracksBox.setToolTipText("应用到所有音轨");
             pitchAllTracksBox.addActionListener(e -> {
                 if (updating) {
                     return;
@@ -412,7 +412,7 @@ final class InspectPanels {
             });
             add(pitchAllTracksBox);
             pitchFitButton.setFont(Theme.SMALL_FONT);
-            pitchFitButton.setToolTipText("自动定位音域，使本音轨所有平行线都可见");
+            pitchFitButton.setToolTipText("适配平行线");
             pitchFitButton.addActionListener(e -> {
                 MidiDocumentView view = app.activeView();
                 if (view != null) {

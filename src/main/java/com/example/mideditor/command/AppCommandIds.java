@@ -21,6 +21,8 @@ public final class AppCommandIds {
     public static final String EDIT_PASTE = "edit.paste";
     public static final String EDIT_DELETE = "edit.delete";
     public static final String EDIT_SELECT_ALL = "edit.selectAll";
+    /** Esc：取消所有选中。 */
+    public static final String EDIT_DESELECT = "edit.deselect";
     public static final String EDIT_QUANTIZE = "edit.quantize";
     public static final String EDIT_VELOCITY_UP = "edit.velocityUp";
     public static final String EDIT_VELOCITY_DOWN = "edit.velocityDown";
@@ -100,4 +102,5 @@ public final class AppCommandIds {
     public static final String WINDOW_CLOSE = "window.close";
 
     public static final String HELP_ABOUT = "help.about";
+    public static final String HELP_SHORTCUTS = "help.shortcuts";
 }

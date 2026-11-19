@@ -27,6 +27,18 @@
   </dependencies>
 
   <build>
+    <resources>
+      <resource>
+        <directory>src/main/resources</directory>
+      </resource>
+      <!-- 快捷键总表随程序打包：帮助 → 快捷键 解出到临时目录并用系统默认程序打开 -->
+      <resource>
+        <directory>docs</directory>
+        <includes>
+          <include>SHORTCUTS.md</include>
+        </includes>
+      </resource>
+    </resources>
     <pluginManagement>
       <plugins>
         <plugin>

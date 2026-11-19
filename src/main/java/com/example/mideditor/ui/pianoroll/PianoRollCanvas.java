@@ -38,6 +38,11 @@ public final class PianoRollCanvas extends JComponent {
     private Note pressedNote;
     private boolean dragged;
     private Rectangle marquee;
+    /** 框选时鼠标在视口里的位置（自动滚动用；null = 不在框选中）。 */
+    private Point marqueeViewportPoint;
+    private final javax.swing.Timer marqueeScroller;
+    private static final int MARQUEE_EDGE = 24;
+    private static final int MARQUEE_SCROLL_STEP = 24;
 
     public PianoRollCanvas(PianoRollView view) {
         this.view = view;
@@ -49,6 +54,9 @@ public final class PianoRollCanvas extends JComponent {
         addMouseMotionListener(handler);
         addMouseWheelListener(handler);
         installArrowKeys();
+        // 框选拖到视口边缘时鼠标往往不再移动，mouseDragged 也就不会再触发 —— 用定时器持续滚动
+        marqueeScroller = new javax.swing.Timer(30, e -> autoScrollMarquee());
+        marqueeScroller.setRepeats(true);
     }
 
     /** 方向键移动选中框（画布有焦点时优先于滚动面板的同键绑定）。 */
@@ -103,6 +111,54 @@ public final class PianoRollCanvas extends JComponent {
         }
     }
 
+    /** 框选时鼠标停在视口边缘就持续滚动（不需要继续移动鼠标）。 */
+    private void updateMarqueeScroller() {
+        if (marqueeViewportPoint == null) {
+            marqueeScroller.stop();
+            return;
+        }
+        Rectangle visible = view.visibleRect();
+        boolean nearEdge = marqueeViewportPoint.x < MARQUEE_EDGE
+                || marqueeViewportPoint.x > visible.width - MARQUEE_EDGE
+                || marqueeViewportPoint.y < MARQUEE_EDGE
+                || marqueeViewportPoint.y > visible.height - MARQUEE_EDGE;
+        if (nearEdge && !marqueeScroller.isRunning()) {
+            marqueeScroller.start();
+        } else if (!nearEdge && marqueeScroller.isRunning()) {
+            marqueeScroller.stop();
+        }
+    }
+
+    /** 定时器：按鼠标停在边缘的方向滚一格，并把框选矩形跟着重算（画布坐标）。 */
+    private void autoScrollMarquee() {
+        if (mode != Mode.MARQUEE || marqueeViewportPoint == null) {
+            marqueeScroller.stop();
+            return;
+        }
+        javax.swing.JViewport viewport = view.scrollPane().getViewport();
+        Rectangle visible = viewport.getViewRect();
+        int dx = marqueeViewportPoint.x < MARQUEE_EDGE ? -MARQUEE_SCROLL_STEP
+                : marqueeViewportPoint.x > visible.width - MARQUEE_EDGE ? MARQUEE_SCROLL_STEP : 0;
+        int dy = marqueeViewportPoint.y < MARQUEE_EDGE ? -MARQUEE_SCROLL_STEP
+                : marqueeViewportPoint.y > visible.height - MARQUEE_EDGE ? MARQUEE_SCROLL_STEP : 0;
+        if (dx == 0 && dy == 0) {
+            marqueeScroller.stop();
+            return;
+        }
+        int x = Math.max(0, visible.x + dx);
+        int y = Math.max(0, visible.y + dy);
+        if (x == visible.x && y == visible.y) {
+            return; // 已经到头了
+        }
+        viewport.setViewPosition(new Point(x, y));
+        Rectangle scrolled = viewport.getViewRect();
+        int canvasX = marqueeViewportPoint.x + scrolled.x;
+        int canvasY = marqueeViewportPoint.y + scrolled.y;
+        marquee = new Rectangle(Math.min(pressX, canvasX), Math.min(pressY, canvasY),
+                Math.abs(canvasX - pressX), Math.abs(canvasY - pressY));
+        repaint();
+    }
+
     private final class Handler extends MouseAdapter {
 
         @Override
@@ -119,6 +175,8 @@ public final class PianoRollCanvas extends JComponent {
             if (hit.track() == null) {
                 return;
             }
+            // 记住“最后一次点击频谱的时间位置”：粘贴时内容就从这里开始（音高保持剪贴板原样）
+            host().setPasteAnchor(hit.tick());
 
             int playheadX = view.timeline().xAtTick(host().playheadTick(), ppq);
             if (Math.abs(e.getX() - playheadX) <= 4) {
@@ -157,6 +215,8 @@ public final class PianoRollCanvas extends JComponent {
             pressX = e.getX();
             pressY = e.getY();
             marquee = new Rectangle(pressX, pressY, 0, 0);
+            marqueeViewportPoint = null;
+            marqueeScroller.stop();
             repaint();
         }
 
@@ -170,6 +230,9 @@ public final class PianoRollCanvas extends JComponent {
                     marquee = new Rectangle(
                             Math.min(pressX, e.getX()), Math.min(pressY, e.getY()),
                             Math.abs(e.getX() - pressX), Math.abs(e.getY() - pressY));
+                    Rectangle visible = view.visibleRect();
+                    marqueeViewportPoint = new Point(e.getX() - visible.x, e.getY() - visible.y);
+                    updateMarqueeScroller();
                     repaint();
                 }
                 case MOVE -> {
@@ -202,6 +265,8 @@ public final class PianoRollCanvas extends JComponent {
                 case MOVE -> host().commitSelectionEdit("移动平行线");
                 case RESIZE -> host().commitSelectionEdit("调整平行线长度");
                 case MARQUEE -> {
+                    marqueeScroller.stop();
+                    marqueeViewportPoint = null;
                     Rectangle rect = marquee;
                     marquee = null;
                     if (rect != null && (rect.width > 3 || rect.height > 3)) {
@@ -281,7 +346,6 @@ public final class PianoRollCanvas extends JComponent {
         }
 
         private void openContextMenu(MouseEvent e, HitInfo hit) {
-            MidiDocument document = host().document();
             long tick = hit.tick();
             if (hit.onNote()) {
                 host().setActiveTrack(hit.track());
@@ -292,7 +356,7 @@ public final class PianoRollCanvas extends JComponent {
             } else if (hit.onEmptySpace()) {
                 host().setActiveTrack(hit.track());
                 host().selection().clear();
-                host().setPendingAdd(host().grid().snap(tick, document.ppq()), hit.pitch());
+                host().setPendingAdd(host().grid().snap(tick, host().document().ppq()), hit.pitch());
                 host().setPendingSplit(tick);
             }
             PianoRollContextMenu.show(PianoRollCanvas.this, hit, new Point(e.getX(), e.getY()));

@@ -72,6 +72,17 @@ final class EditCommands {
                 FileCommands.key(KeyEvent.VK_A, InputEvent.CTRL_DOWN_MASK),
                 ctx -> ctx.document().selectAll(), CommandContext::hasTrack, null));
 
+        // Esc：取消所有选中（输入模式下 Esc 归“退出输入模式”，由 InputModeDispatcher 先吃掉）
+        registry.register(new AppCommand(AppCommandIds.EDIT_DESELECT, "取消选择", CommandScope.SELECTION,
+                FileCommands.key(KeyEvent.VK_ESCAPE, 0),
+                ctx -> {
+                    if (TextFocusGuard.isTextEditing()) {
+                        return;
+                    }
+                    ctx.document().clearSelection();
+                },
+                CommandContext::hasSelection, null));
+
         AppCommand quantize = new AppCommand(AppCommandIds.EDIT_QUANTIZE, "量化到网格", CommandScope.SELECTION,
                 FileCommands.key(KeyEvent.VK_Q, InputEvent.CTRL_DOWN_MASK),
                 ctx -> ctx.document().quantizeSelection(), CommandContext::hasSelection, null);
@@ -120,7 +131,7 @@ final class EditCommands {
                 ctx -> ctx.hasDocument() && ctx.document().inputMode(),
                 ctx -> ctx.hasDocument() && ctx.document().inputBeatSnap());
         beatSnap.putIcon(Icons.beatSnap());
-        beatSnap.putShortDescription("节奏辅助：输入的音符吸附到当前网格分辨率（要八分音符就把网格选成 1/8）");
+        beatSnap.putShortDescription("输入的音符对齐到网格");
         registry.register(beatSnap);
 
         // ---- 平行线

@@ -35,9 +35,9 @@ public final class DockPanel extends JPanel {
 
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 2, 1));
         buttons.setOpaque(false);
-        JButton floatButton = smallButton("浮", "浮动 / 停靠");
+        JButton floatButton = smallButton("浮", "浮动");
         floatButton.addActionListener(e -> manager.floatPanel(this));
-        JButton closeButton = smallButton("×", "关闭面板");
+        JButton closeButton = smallButton("×", "关闭");
         closeButton.addActionListener(e -> manager.hide(this));
         buttons.add(floatButton);
         buttons.add(closeButton);

@@ -39,8 +39,27 @@ public final class ArrowKeyDispatcher implements KeyEventDispatcher {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
-        TextFocusGuard.noteKeyboardEvent();
-        if (e.getID() != KeyEvent.KEY_PRESSED || e.isAltDown() || TextFocusGuard.isTextEditing()) {
+        TextFocusGuard.noteKeyboardEvent(e);
+        if (e.getID() != KeyEvent.KEY_PRESSED) {
+            return false;
+        }
+        // Esc 先处理：它不产生字符，所以焦点停在 BPM / 网格等控件上时也应生效
+        // （输入模式下归 InputModeDispatcher 负责退出输入模式，这里不插手）
+        if (e.getKeyCode() == KeyEvent.VK_ESCAPE && !e.isAltDown() && !e.isControlDown()
+                && !e.isShiftDown() && isMainWindowActive()) {
+            MidiDocumentView view = app.documents().activeView();
+            if (view != null && !view.inputMode()) {
+                CommandContext context = app.router().context();
+                AppCommand command = app.registry().get(AppCommandIds.EDIT_DESELECT);
+                if (context != null && command != null && command.isEnabled(context)) {
+                    app.router().dispatch(AppCommandIds.EDIT_DESELECT, context);
+                    e.consume();
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (e.isAltDown() || TextFocusGuard.isTextEditing()) {
             return false;
         }
         if (!isMainWindowActive()) {

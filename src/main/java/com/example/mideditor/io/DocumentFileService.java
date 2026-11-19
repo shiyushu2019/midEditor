@@ -43,7 +43,7 @@ public final class DocumentFileService {
             Path path = ensureMidiExtension(chooser.getSelectedFile().toPath());
             if (Files.isDirectory(path)) {
                 JOptionPane.showMessageDialog(parent,
-                        "所选路径是一个目录，请指定文件名。", "保存失败", JOptionPane.WARNING_MESSAGE);
+                        "请指定文件名。", "保存失败", JOptionPane.WARNING_MESSAGE);
                 return null;
             }
             if (!ensureOverwriteAllowed(path, () -> confirmOverwrite(parent, path))) {
@@ -80,8 +80,8 @@ public final class DocumentFileService {
 
     private static boolean confirmOverwrite(Component parent, Path path) {
         int choice = JOptionPane.showConfirmDialog(parent,
-                "文件已存在：\n" + path.toAbsolutePath() + "\n\n是否覆盖？",
-                "确认覆盖",
+                "“" + path.getFileName() + "”已存在，是否替换？",
+                "确认替换",
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.WARNING_MESSAGE);
         return choice == JOptionPane.YES_OPTION;

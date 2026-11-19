@@ -31,7 +31,7 @@ final class PlaybackCommands {
         registry.bindAlias(AppCommandIds.PLAY_PLAY_PAUSE, FileCommands.key(KeyEvent.VK_SPACE, 0));
 
         AppCommand stop = new AppCommand(AppCommandIds.PLAY_STOP, "停止", CommandScope.DOCUMENT,
-                FileCommands.key(KeyEvent.VK_F5, InputEvent.CTRL_DOWN_MASK),
+                FileCommands.key(KeyEvent.VK_F4, 0),
                 ctx -> ctx.document().stopTransport(), CommandContext::hasDocument, null);
         stop.putIcon(Icons.STOP);
         registry.register(stop);

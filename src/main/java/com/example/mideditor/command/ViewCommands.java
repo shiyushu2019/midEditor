@@ -1,13 +1,17 @@
 package com.example.mideditor.command;
 
+import java.awt.Desktop;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
+import java.io.IOException;
 import java.util.function.Predicate;
 
 import javax.swing.JOptionPane;
 
+import com.example.mideditor.MidiEditorApp;
 import com.example.mideditor.app.AppContext;
 import com.example.mideditor.ui.dock.DockIds;
+import com.example.mideditor.ui.frame.ShortcutDoc;
 
 /** 视图 / 窗口 / 帮助命令。 */
 final class ViewCommands {
@@ -130,6 +134,8 @@ final class ViewCommands {
                 CommandContext::hasDocument, null));
 
         // ---- 帮助
+        registry.register(new AppCommand(AppCommandIds.HELP_SHORTCUTS, "快捷键", CommandScope.APPLICATION,
+                null, ctx -> showShortcuts(ctx.app()), ctx -> true, null));
         registry.register(new AppCommand(AppCommandIds.HELP_ABOUT, "关于 midEditor", CommandScope.APPLICATION,
                 null, ctx -> showAbout(ctx.app()), ctx -> true, null));
     }
@@ -142,21 +148,31 @@ final class ViewCommands {
         app.refreshApplicationState();
     }
 
+    /** 帮助 → 快捷键：把打包进 jar 的 SHORTCUTS.md 交给系统默认程序打开。 */
+    private static void showShortcuts(AppContext app) {
+        try {
+            java.nio.file.Path file = ShortcutDoc.materialize();
+            Desktop desktop = Desktop.isDesktopSupported() ? Desktop.getDesktop() : null;
+            if (desktop == null || !desktop.isSupported(Desktop.Action.OPEN)) {
+                throw new IOException("当前系统不支持用默认程序打开文件");
+            }
+            desktop.open(file.toFile());
+        } catch (IOException | RuntimeException ex) {
+            JOptionPane.showMessageDialog(app.mainFrame(),
+                    "无法打开快捷键文档：" + ex.getMessage() + "\n\n文件位置：\n" + ShortcutDoc.location(),
+                    "快捷键", JOptionPane.WARNING_MESSAGE);
+        }
+    }
+
     private static void showAbout(AppContext app) {
         String message = """
-                midEditor — 经典 MDI 多音轨 MIDI 编辑器
+                midEditor %s
+                多音轨 MIDI 编辑器
 
-                窗口架构：Main Frame / MDI Client Area / MDI Child Window
-                编辑对象：「平行线」（平行于横轴，粗细=力度）
-                音符解析：javax.sound.midi
-                音频后端：%s
-                运行环境：Java %s
-
-                快捷键：空格 播放/暂停，Delete 删除平行线，
-                Ctrl+Z/Ctrl+Shift+Z 撤销/重做，Alt+↑↓←→ 移动平行线。
-                滚轮：频谱上下滚动（音轨头上滚轮 = 滚动放不下的音轨）；
-                Shift+滚轮 左右滚动，Alt+滚轮 左右缩放，Ctrl+滚轮 上下缩放。
-                """.formatted(app.synth().description(), System.getProperty("java.version"));
+                Java %s
+                %s
+                """.formatted(MidiEditorApp.VERSION, System.getProperty("java.version"),
+                app.synth().description());
         JOptionPane.showMessageDialog(app.mainFrame(), message, "关于 midEditor",
                 JOptionPane.INFORMATION_MESSAGE);
     }

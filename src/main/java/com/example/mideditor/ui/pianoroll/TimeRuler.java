@@ -44,7 +44,7 @@ public final class TimeRuler extends JComponent {
     public TimeRuler(PianoRollView view) {
         this.view = view;
         setPreferredSize(new java.awt.Dimension(1200, Theme.RULER_HEIGHT));
-        setToolTipText("顶部循环条：拖动设置循环域（双击关闭）；下方：点击或拖动定位播放头");
+        setToolTipText("拖动定位播放头；顶部循环条拖动设置循环域");
         MouseAdapter adapter = new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {

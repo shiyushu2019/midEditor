@@ -37,9 +37,16 @@ public final class MainFrame extends JFrame {
         this.app = app;
         setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
         setLayout(new BorderLayout());
-        setMinimumSize(new Dimension(1000, 660));
-        setSize(1440, 920);
-        setLocationRelativeTo(null);
+        // 窗口必须整个落在「可用桌面区域」之内，否则底部状态栏会被任务栏/屏幕边缘挡掉
+        java.awt.Rectangle usable = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment()
+                .getMaximumWindowBounds();
+        Dimension minSize = new Dimension(Math.min(1000, usable.width), Math.min(660, usable.height));
+        setMinimumSize(minSize);
+        int width = Math.min(1440, usable.width);
+        int height = Math.min(920, usable.height);
+        setSize(Math.max(minSize.width, width), Math.max(minSize.height, height));
+        setLocation(usable.x + Math.max(0, (usable.width - getWidth()) / 2),
+                usable.y + Math.max(0, (usable.height - getHeight()) / 2));
         setFont(Theme.BASE_FONT);
 
         app.initialize(getRootPane());
@@ -52,6 +59,9 @@ public final class MainFrame extends JFrame {
         dock.setCenter(workspace);
         add(dock, BorderLayout.CENTER);
         add(statusBar, BorderLayout.SOUTH);
+
+        // 默认最大化：桌面软件一打开就占满可用桌面，不需要先拉边框
+        setExtendedState(getExtendedState() | JFrame.MAXIMIZED_BOTH);
 
         app.setDock(dock);
         registerSelf();
@@ -117,8 +127,8 @@ public final class MainFrame extends JFrame {
             statusBar.setTrack("-");
             statusBar.setPosition(0, 0, 480);
             statusBar.setZoom(1);
-            statusBar.setDirty(false);
-            statusBar.setMessage("音频：" + app.synth().description());
+            statusBar.clearSavedState();
+            statusBar.setInfo("音频 " + (app.synth().available() ? "就绪" : "不可用"));
             return;
         }
         Track track = view.activeTrack();
@@ -130,10 +140,9 @@ public final class MainFrame extends JFrame {
         statusBar.setPosition(tick, document.tempoMap().microsAtTick(tick), document.ppq());
         statusBar.setZoom(view.pianoRoll().timeline().zoom());
         statusBar.setDirty(view.isDirty());
-        statusBar.setMessage("音轨 " + document.tracks().size()
-                + " · 平行线 " + document.totalNoteCount()
-                + " · PPQ " + document.ppq()
-                + " · " + app.synth().description());
+        statusBar.setInfo(document.tracks().size() + " 音轨 · "
+                + document.totalNoteCount() + " 平行线 · PPQ " + document.ppq()
+                + " · 音频 " + (app.synth().available() ? "就绪" : "不可用"));
     }
 
     /** 重建「窗口」菜单中的文档列表（MDI 窗口切换）。 */

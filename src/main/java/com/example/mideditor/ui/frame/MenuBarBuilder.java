@@ -101,6 +101,7 @@ public final class MenuBarBuilder {
         item(menu, AppCommandIds.EDIT_PASTE, "粘贴(P)");
         item(menu, AppCommandIds.EDIT_DELETE, "删除(D)");
         item(menu, AppCommandIds.EDIT_SELECT_ALL, "全选(L)");
+        item(menu, AppCommandIds.EDIT_DESELECT, "取消选择");
         menu.addSeparator();
         item(menu, AppCommandIds.EDIT_QUANTIZE, "量化到网格(Q)");
         item(menu, AppCommandIds.EDIT_VELOCITY_UP, "力度 +10");
@@ -113,49 +114,38 @@ public final class MenuBarBuilder {
         JMenu lines = new JMenu("平行线");
         lines.setFont(Theme.BASE_FONT);
         item(lines, AppCommandIds.NOTE_ADD, "添加平行线");
-        item(lines, AppCommandIds.NOTE_LOCK, "收尾锁定（连到相邻平行线）");
+        item(lines, AppCommandIds.NOTE_LOCK, "收尾锁定");
         item(lines, AppCommandIds.NOTE_UNLOCK, "解除锁定");
         item(lines, AppCommandIds.NOTE_DELETE, "删除平行线");
-        item(lines, AppCommandIds.NOTE_SPLIT, "拆分平行线（右键位置）");
+        item(lines, AppCommandIds.NOTE_SPLIT, "拆分平行线");
         lines.addSeparator();
         item(lines, AppCommandIds.NOTE_MOVE_UP, "上移半音");
         item(lines, AppCommandIds.NOTE_MOVE_DOWN, "下移半音");
-        item(lines, AppCommandIds.NOTE_MOVE_LEFT, "左移网格");
-        item(lines, AppCommandIds.NOTE_MOVE_RIGHT, "右移网格");
+        item(lines, AppCommandIds.NOTE_MOVE_LEFT, "左移一格");
+        item(lines, AppCommandIds.NOTE_MOVE_RIGHT, "右移一格");
         lines.addSeparator();
         item(lines, AppCommandIds.NOTE_SELECT_LEFT, "选中左一条");
         item(lines, AppCommandIds.NOTE_SELECT_RIGHT, "选中右一条");
         item(lines, AppCommandIds.NOTE_SELECT_UP, "选中上一条");
         item(lines, AppCommandIds.NOTE_SELECT_DOWN, "选中下一条");
         lines.addSeparator();
-        item(lines, AppCommandIds.NOTE_EXTEND_LEFT, "左端延长一格（Ctrl+←）");
-        item(lines, AppCommandIds.NOTE_EXTEND_RIGHT, "右端延长一格（Ctrl+→）");
+        item(lines, AppCommandIds.NOTE_EXTEND_LEFT, "左端延长");
+        item(lines, AppCommandIds.NOTE_EXTEND_RIGHT, "右端延长");
         lines.addSeparator();
-        item(lines, AppCommandIds.NOTE_LENGTHEN, "拉长平行线");
-        item(lines, AppCommandIds.NOTE_SHORTEN, "缩短平行线");
+        item(lines, AppCommandIds.NOTE_LENGTHEN, "拉长");
+        item(lines, AppCommandIds.NOTE_SHORTEN, "缩短");
         lines.addSeparator();
-        item(lines, AppCommandIds.REST_INSERT, "插入休止（后续右移）");
-        item(lines, AppCommandIds.REST_DELETE, "删除休止（后续左移）");
+        item(lines, AppCommandIds.REST_INSERT, "插入休止");
+        item(lines, AppCommandIds.REST_DELETE, "删除休止");
         menu.addSeparator();
         menu.add(lines);
-
-        JMenu track = new JMenu("音轨");
-        track.setFont(Theme.BASE_FONT);
-        item(track, AppCommandIds.TRACK_ADD, "添加音轨");
-        item(track, AppCommandIds.TRACK_REMOVE, "删除音轨");
-        item(track, AppCommandIds.TRACK_MOVE_UP, "音轨上移");
-        item(track, AppCommandIds.TRACK_MOVE_DOWN, "音轨下移");
-        track.addSeparator();
-        checkItem(track, AppCommandIds.TRACK_TOGGLE_MUTE, "静音");
-        checkItem(track, AppCommandIds.TRACK_TOGGLE_SOLO, "独奏");
-        menu.add(track);
         return menu;
     }
 
     private JMenu trackMenu() {
         JMenu menu = menu("音轨(T)", 'T');
         item(menu, AppCommandIds.TRACK_ADD, "添加音轨(A)");
-        item(menu, AppCommandIds.TRACK_REMOVE, "删除当前音轨(D)");
+        item(menu, AppCommandIds.TRACK_REMOVE, "删除音轨(D)");
         menu.addSeparator();
         item(menu, AppCommandIds.TRACK_MOVE_UP, "音轨上移(U)");
         item(menu, AppCommandIds.TRACK_MOVE_DOWN, "音轨下移(N)");
@@ -188,15 +178,15 @@ public final class MenuBarBuilder {
         checkItem(menu, AppCommandIds.VIEW_TOGGLE_GRID, "显示网格");
         checkItem(menu, AppCommandIds.VIEW_FOLLOW_PLAYHEAD, "播放头跟随");
         checkItem(menu, AppCommandIds.VIEW_KEYBOARD_RULER, "键盘标尺(K)");
-        checkItem(menu, AppCommandIds.VIEW_C_HIGHLIGHT, "Do（C）高亮");
-        JMenu pitch = new JMenu("音域（频率轴）");
+        checkItem(menu, AppCommandIds.VIEW_C_HIGHLIGHT, "C 高亮");
+        JMenu pitch = new JMenu("音域");
         pitch.setFont(Theme.BASE_FONT);
-        item(pitch, AppCommandIds.VIEW_PITCH_ZOOM_IN, "放大（更少半音、行更高）");
-        item(pitch, AppCommandIds.VIEW_PITCH_ZOOM_OUT, "缩小（更多半音）");
-        item(pitch, AppCommandIds.VIEW_PITCH_ZOOM_RESET, "重置为 30 个半音");
+        item(pitch, AppCommandIds.VIEW_PITCH_ZOOM_IN, "放大");
+        item(pitch, AppCommandIds.VIEW_PITCH_ZOOM_OUT, "缩小");
+        item(pitch, AppCommandIds.VIEW_PITCH_ZOOM_RESET, "重置");
         pitch.addSeparator();
-        item(pitch, AppCommandIds.VIEW_PITCH_FIT, "适配本音轨平行线");
-        item(pitch, AppCommandIds.VIEW_PITCH_SHOW_ALL, "显示全部音域（128）");
+        item(pitch, AppCommandIds.VIEW_PITCH_FIT, "适配平行线");
+        item(pitch, AppCommandIds.VIEW_PITCH_SHOW_ALL, "显示全部音域");
         menu.add(pitch);
         menu.addSeparator();
 
@@ -209,7 +199,7 @@ public final class MenuBarBuilder {
         menu.add(arrange);
 
         item(menu, AppCommandIds.PLAY_TOGGLE_LOOP, "循环播放");
-        item(menu, AppCommandIds.PLAY_LOOP_TO_SELECTION, "循环域＝选区");
+        item(menu, AppCommandIds.PLAY_LOOP_TO_SELECTION, "循环域设为选区");
         item(menu, AppCommandIds.PLAY_LOOP_CLEAR, "清除循环域");
         item(menu, AppCommandIds.PLAY_TOGGLE_METRONOME, "节拍器");
         return menu;
@@ -217,6 +207,7 @@ public final class MenuBarBuilder {
 
     private JMenu helpMenu() {
         JMenu menu = menu("帮助(H)", 'H');
+        item(menu, AppCommandIds.HELP_SHORTCUTS, "快捷键");
         item(menu, AppCommandIds.HELP_ABOUT, "关于 midEditor");
         return menu;
     }

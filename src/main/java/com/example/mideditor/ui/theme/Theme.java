@@ -19,9 +19,11 @@ public final class Theme {
     public static final int ROW_HEIGHT = 8;
     public static final int LANE_ROWS = com.example.mideditor.domain.Track.VISIBLE_ROWS;
     public static final int LANE_HEIGHT = ROW_HEIGHT * LANE_ROWS;
-    public static final int HEADER_WIDTH = 244;
+    /** 音轨信息面板（名称 / 乐器 / 音量 / 声像 / 按钮）宽度：原来是 244，缩到三分之一。 */
+    public static final int HEADER_WIDTH = 81;
     public static final int RULER_HEIGHT = 34;
-    public static final int PITCH_STRIP_WIDTH = 46;
+    /** 钢琴标尺（Y 轴键盘）宽度：原来是 46，缩到一半。 */
+    public static final int PITCH_STRIP_WIDTH = 23;
 
     public static final Color CANVAS_BACKGROUND = new Color(0x20252C);
     public static final Color ROW_WHITE = new Color(0x2A323C);

@@ -511,6 +511,14 @@ public final class PianoRollView extends JPanel {
         }
     }
 
+    /** 把时间轴拉回开头（横向 x=0），纵向位置不变。 */
+    public void scrollToTimeStart() {
+        java.awt.Rectangle view = scroll.getViewport().getViewRect();
+        if (view.x != 0) {
+            scroll.getViewport().setViewPosition(new java.awt.Point(0, view.y));
+        }
+    }
+
     public Rectangle visibleRect() {
         return scroll.getViewport().getViewRect();
     }

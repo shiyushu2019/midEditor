@@ -107,7 +107,7 @@ public final class PianoKeysColumn extends JComponent {
                         String label = "C" + (pitch / 12 - 1);
                         g2.setColor(cHighlight ? Theme.KEY_C_TEXT
                                 : (active ? new Color(0x1B3B6F) : new Color(0x3A4552)));
-                        g2.drawString(label, width - 6 - metrics.stringWidth(label),
+                        g2.drawString(label, Math.max(1, width - 2 - metrics.stringWidth(label)),
                                 y + Math.min(rowHeight - 1, metrics.getAscent() + 1));
                     }
                 }

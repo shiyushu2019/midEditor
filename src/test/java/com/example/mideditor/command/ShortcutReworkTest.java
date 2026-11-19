@@ -22,11 +22,11 @@ import com.example.mideditor.app.MainFrame;
 import com.example.mideditor.document.DocumentSession;
 import com.example.mideditor.document.MidiDocumentView;
 
-/** 播放键改成 F5 / Ctrl+F5 / F6；Ctrl+I 在三种输入状态之间循环。 */
+/** 播放键改成 F5 / F4 / F6；Ctrl+I 在三种输入状态之间循环。 */
 class ShortcutReworkTest {
 
     @Test
-    void playbackKeysAreF5AndF6() {
+    void playbackKeysAreF5F4AndF6() {
         JPanel keyTarget = new JPanel();
         AppContext app = new AppContext();
         app.initialize(keyTarget);
@@ -34,9 +34,10 @@ class ShortcutReworkTest {
 
         assertEquals(AppCommandIds.PLAY_PLAY_PAUSE, map.get(KeyStroke.getKeyStroke(KeyEvent.VK_F5, 0)),
                 "F5 = 播放 / 暂停");
-        assertEquals(AppCommandIds.PLAY_STOP,
-                map.get(KeyStroke.getKeyStroke(KeyEvent.VK_F5, InputEvent.CTRL_DOWN_MASK)),
-                "Ctrl+F5 = 停止");
+        assertEquals(AppCommandIds.PLAY_STOP, map.get(KeyStroke.getKeyStroke(KeyEvent.VK_F4, 0)),
+                "F4 = 停止");
+        assertEquals(null, map.get(KeyStroke.getKeyStroke(KeyEvent.VK_F5, InputEvent.CTRL_DOWN_MASK)),
+                "Ctrl+F5 不再绑定任何命令（之前会误触）");
         assertEquals(AppCommandIds.PLAY_REWIND, map.get(KeyStroke.getKeyStroke(KeyEvent.VK_F6, 0)),
                 "F6 = 回到开头");
         assertEquals(AppCommandIds.PLAY_PLAY_PAUSE, map.get(KeyStroke.getKeyStroke(KeyEvent.VK_SPACE, 0)),

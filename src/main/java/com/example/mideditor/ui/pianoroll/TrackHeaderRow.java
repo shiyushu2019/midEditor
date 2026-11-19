@@ -1,5 +1,6 @@
 package com.example.mideditor.ui.pianoroll;
 
+import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
@@ -47,9 +48,11 @@ public final class TrackHeaderRow extends JPanel {
         setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER));
         setPreferredSize(new Dimension(Theme.HEADER_WIDTH, Theme.LANE_HEIGHT));
         setMaximumSize(new Dimension(Integer.MAX_VALUE, Theme.LANE_HEIGHT));
+        // 行头只有 80px 左右宽：所有控件的尺寸都按这个宽度算
+        int inner = Math.max(48, Theme.HEADER_WIDTH - 8);
 
         colorButton = new JButton();
-        colorButton.setPreferredSize(new Dimension(14, 14));
+        colorButton.setPreferredSize(new Dimension(12, 14));
         colorButton.setToolTipText("音轨颜色");
         colorButton.setBackground(track.color());
         colorButton.setOpaque(true);
@@ -58,7 +61,7 @@ public final class TrackHeaderRow extends JPanel {
         nameField = new JTextField(track.name());
         nameField.setFont(Theme.BOLD_FONT);
         nameField.setBorder(BorderFactory.createEmptyBorder(1, 3, 1, 3));
-        nameField.setPreferredSize(new Dimension(120, 22));
+        nameField.setPreferredSize(new Dimension(Math.max(32, inner - 18), 20));
         nameField.setEditable(false);
         nameField.setFocusable(false);
         nameField.setToolTipText("单击切换音轨，双击重命名");
@@ -107,11 +110,11 @@ public final class TrackHeaderRow extends JPanel {
             view.refreshPitchLabels();
         });
 
-        JPanel row1 = row();
-        row1.add(colorButton);
-        row1.add(nameField);
-        row1.add(muteButton);
-        row1.add(soloButton);
+        JPanel row1 = new JPanel(new BorderLayout(2, 0));
+        row1.setOpaque(false);
+        row1.setAlignmentX(LEFT_ALIGNMENT);
+        row1.add(colorButton, BorderLayout.WEST);
+        row1.add(nameField, BorderLayout.CENTER);
 
         programBox = new JComboBox<>();
         programBox.setFont(Theme.SMALL_FONT);
@@ -133,13 +136,14 @@ public final class TrackHeaderRow extends JPanel {
             host().pushEdit(SimpleEdit.value("选择乐器", () -> track.setProgram(program), () -> track.setProgram(old)));
             host().audioSettingsChanged();
         });
+        programBox.setPreferredSize(new Dimension(inner, 20));
+        programBox.setToolTipText("乐器");
         JPanel row2 = row();
-        JLabel programLabel = smallLabel("乐器");
-        row2.add(programLabel);
         row2.add(programBox);
 
         volumeSlider = new JSlider(0, 127, track.volume());
-        volumeSlider.setPreferredSize(new Dimension(150, 20));
+        volumeSlider.setPreferredSize(new Dimension(inner, 18));
+        volumeSlider.setToolTipText("音量");
         volumeSlider.addChangeListener(e -> {
             if (updating || volumeSlider.getValueIsAdjusting()) {
                 return;
@@ -154,11 +158,11 @@ public final class TrackHeaderRow extends JPanel {
             host().audioSettingsChanged();
         });
         JPanel row3 = row();
-        row3.add(smallLabel("音量"));
         row3.add(volumeSlider);
 
         panSlider = new JSlider(0, 127, track.pan());
-        panSlider.setPreferredSize(new Dimension(150, 20));
+        panSlider.setPreferredSize(new Dimension(inner, 18));
+        panSlider.setToolTipText("声像");
         panSlider.addChangeListener(e -> {
             if (updating || panSlider.getValueIsAdjusting()) {
                 return;
@@ -173,31 +177,48 @@ public final class TrackHeaderRow extends JPanel {
             host().audioSettingsChanged();
         });
         JPanel row4 = row();
-        row4.add(smallLabel("声像"));
         row4.add(panSlider);
 
-        JButton up = tinyButton("▲", "音域上移一个半音");
-        JButton down = tinyButton("▼", "音域下移一个半音");
-        JButton zoomIn = tinyButton("＋", "放大音域：显示更少半音、每行更高");
-        JButton zoomOut = tinyButton("－", "缩小音域：显示更多半音，最多 128（全音域）");
+        JButton up = tinyButton("▲", "音域上移");
+        JButton down = tinyButton("▼", "音域下移");
+        JButton zoomIn = tinyButton("＋", "放大音域");
+        JButton zoomOut = tinyButton("－", "缩小音域");
         up.addActionListener(e -> shiftRange(1));
         down.addActionListener(e -> shiftRange(-1));
         zoomIn.addActionListener(e -> zoomRange(true));
         zoomOut.addActionListener(e -> zoomRange(false));
         rangeLabel = smallLabel("");
-        rangeLabel.setToolTipText("当前音轨可见音域");
-        JPanel row5 = row();
-        row5.add(up);
-        row5.add(down);
-        row5.add(zoomIn);
-        row5.add(zoomOut);
-        row5.add(rangeLabel);
+        rangeLabel.setToolTipText("音域");
+        // 窄行头：静音/独奏一行，音域上下移一行，音域缩放一行
+        JPanel row5 = new JPanel(new java.awt.GridLayout(1, 2, 1, 0));
+        row5.setOpaque(false);
+        row5.setAlignmentX(LEFT_ALIGNMENT);
+        row5.add(muteButton);
+        row5.add(soloButton);
+
+        JPanel row6 = new JPanel(new java.awt.GridLayout(1, 2, 1, 0));
+        row6.setOpaque(false);
+        row6.setAlignmentX(LEFT_ALIGNMENT);
+        row6.add(up);
+        row6.add(down);
+
+        JPanel row7 = new JPanel(new java.awt.GridLayout(1, 2, 1, 0));
+        row7.setOpaque(false);
+        row7.setAlignmentX(LEFT_ALIGNMENT);
+        row7.add(zoomIn);
+        row7.add(zoomOut);
+
+        JPanel row8 = row();
+        row8.add(rangeLabel);
 
         add(row1);
         add(row2);
         add(row3);
         add(row4);
         add(row5);
+        add(row6);
+        add(row7);
+        add(row8);
         add(Box.createVerticalGlue());
 
         addMouseListener(new java.awt.event.MouseAdapter() {
@@ -251,7 +272,7 @@ public final class TrackHeaderRow extends JPanel {
     }
 
     private static JPanel row() {
-        JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 1));
+        JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 2, 1));
         panel.setOpaque(false);
         panel.setAlignmentX(LEFT_ALIGNMENT);
         return panel;

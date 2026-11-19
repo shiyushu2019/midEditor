@@ -99,7 +99,6 @@ class InputModeTest {
                 view.setInputMode(true);
                 view.moveInputCursor(4, 0); // 离开播放头（x=0），免得和播放头红色竖线混在一起
             });
-            int[] probe = new int[2];
             SwingUtilities.invokeAndWait(() -> {
                 var roll = view.pianoRoll();
                 var canvas = roll.canvas();
@@ -112,8 +111,6 @@ class InputModeTest {
                 int pitch = view.inputCursorPitch();
                 int y = (roll.rowTop(view.activeTrack(), 0, pitch)
                         + roll.rowBottom(view.activeTrack(), 0, pitch)) / 2;
-                probe[0] = x;
-                probe[1] = y;
 
                 java.awt.image.BufferedImage image = new java.awt.image.BufferedImage(
                         width, height, java.awt.image.BufferedImage.TYPE_INT_RGB);
@@ -302,27 +299,34 @@ class InputModeTest {
     }
 
     @Test
-    void assistQuantisesInputToTheCurrentGridResolution() throws Exception {
+    void assistSnapsStartAndDurationToTheGrid() throws Exception {
         withDocument((app, view, dispatcher) -> {
+            long[] now = { 0 };
+            view.setNanoClockForTesting(() -> now[0]);
             view.document().tempoMap().setBpm(0, 240); // 一拍 = 250ms = 480 tick
             SwingUtilities.invokeAndWait(() -> {
-                // 网格选 1/8 → 辅助的吸附单位也应该是八分音符，而不是一拍
-                view.grid().setResolution(com.example.mideditor.domain.GridSettings.Resolution.EIGHTH);
+                // 先把光标挪到不在目标网格上的位置，再切到 1/8：确认起点吸附有效
+                view.grid().setResolution(com.example.mideditor.domain.GridSettings.Resolution.THIRTY_SECOND);
                 view.setInputMode(true);
                 view.setInputBeatSnap(true);
             });
-            long eighth = view.grid().step(view.document().ppq()); // 240
-            assertEquals(240, eighth, "前提：1/8 网格 = 240 tick");
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_D, 0));
+            long offGrid = view.inputCursorTick();
+            SwingUtilities.invokeAndWait(() -> view.grid()
+                    .setResolution(com.example.mideditor.domain.GridSettings.Resolution.EIGHTH));
 
+            now[0] = 0;
             dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_SPACE, 0));
-            Thread.sleep(150); // ≈ 288 tick，靠近一个八分音符
+            now[0] = 150_000_000L; // ≈ 288 tick，靠近一个八分音符
             dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_SPACE, 0));
 
             Note entered = firstSounding(view.activeTrack());
             assertTrue(entered != null, "应当落成一条平行线");
-            assertEquals(0, entered.durationTicks() % eighth, "时值必须是八分音符的整数倍");
-            assertTrue(entered.durationTicks() >= eighth, "至少一个八分音符");
-            assertTrue(entered.durationTicks() <= eighth * 2, "150ms 不该被放大到更多格");
+            assertEquals(0, entered.startTick() % 240, "起点吸附到 1/8 网格（原位置 " + offGrid + "）");
+            assertEquals(0, entered.durationTicks() % 240, "时值吸附到 1/8 网格");
+            assertTrue(entered.durationTicks() >= 240 && entered.durationTicks() <= 480,
+                    "150ms 应当落在 1~2 个八分音符之间，实际 " + entered.durationTicks());
+            assertEquals(entered.endTick(), view.inputCursorTick(), "光标跟到末尾");
         });
     }
 
@@ -343,6 +347,7 @@ class InputModeTest {
                 view.setInputBeatSnap(true);
             });
             long unit = view.grid().step(view.document().ppq());
+            assertEquals(480, unit, "前提：1/4 网格 = 480 tick");
             dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_SPACE, 0));
             Thread.sleep(120);
             dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_SPACE, 0));
@@ -350,7 +355,6 @@ class InputModeTest {
             Note entered = firstSounding(view.activeTrack());
             assertTrue(entered != null, "应当落成一条平行线");
             assertEquals(0, entered.startTick(), "起点吸附到最近的网格线");
-            assertEquals(0, entered.durationTicks() % unit, "时值是网格单位的整数倍");
             assertEquals(entered.endTick(), view.inputCursorTick(), "光标跟到末尾");
         });
     }
@@ -360,8 +364,14 @@ class InputModeTest {
         withDocument((app, view, dispatcher) -> {
             view.document().tempoMap().setBpm(0, 240); // 一拍 = 250ms = 480 tick
             SwingUtilities.invokeAndWait(() -> {
-                view.grid().setResolution(com.example.mideditor.domain.GridSettings.Resolution.OFF);
+                view.grid().setResolution(com.example.mideditor.domain.GridSettings.Resolution.THIRTY_SECOND);
                 view.setInputMode(true);
+            });
+            // 先走到一个不在拍线上的位置（1/32 = 60 tick）
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_D, 0));
+            assertEquals(60, view.inputCursorTick(), "前提：光标停在 60 tick");
+            SwingUtilities.invokeAndWait(() -> {
+                view.grid().setResolution(com.example.mideditor.domain.GridSettings.Resolution.OFF);
                 view.setInputBeatSnap(true);
             });
             dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_SPACE, 0));
@@ -370,46 +380,49 @@ class InputModeTest {
 
             Note entered = firstSounding(view.activeTrack());
             assertTrue(entered != null, "应当落成一条平行线");
-            assertEquals(0, entered.durationTicks() % 480, "网格关闭时退回按一拍吸附");
+            assertEquals(0, entered.startTick(), "网格关闭时退回按一拍吸附（60 → 0）");
         });
     }
 
     @Test
-    void assistFollowsTheTappedRhythmNotTheHoldLength() throws Exception {
+    void staccatoPressesAppendWithoutAnyRests() throws Exception {
         withDocument((app, view, dispatcher) -> {
             long[] now = { 0 };
             view.setNanoClockForTesting(() -> now[0]);
             view.document().tempoMap().setBpm(0, 125); // 1 tick = 1000µs
             SwingUtilities.invokeAndWait(() -> {
-                // 1/8 网格 = 240 tick = 240ms
                 view.grid().setResolution(com.example.mideditor.domain.GridSettings.Resolution.EIGHTH);
                 view.setInputMode(true);
                 view.setInputBeatSnap(true);
             });
 
-            // 断奏：每个音只按 100ms，但每 480ms（= 四分音符）敲一下
-            long[] onsets = { 0, 480, 960 };
-            for (long onsetMs : onsets) {
+            // 断奏：每个音只按 100ms，两次之间隔 380ms。间隔不该变成休止符，长度吸附成一个八分音符
+            for (long onsetMs : new long[] { 0, 480, 960 }) {
                 now[0] = onsetMs * 1_000_000L;
                 dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_SPACE, 0));
                 now[0] = (onsetMs + 100) * 1_000_000L;
                 dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_SPACE, 0));
             }
 
-            java.util.List<Long> starts = new java.util.ArrayList<>();
+            java.util.List<Note> sounding = new java.util.ArrayList<>();
             for (Note note : view.activeTrack().notes()) {
-                if (!note.isRest()) {
-                    starts.add(note.startTick());
-                }
+                assertFalse(note.isRest(), "输入模式不该自己插休止符：" + describe(view.activeTrack()));
+                sounding.add(note);
             }
-            java.util.Collections.sort(starts);
-            assertEquals(java.util.List.of(0L, 480L, 960L), starts,
-                    "起点应当跟着“敲击间隔”落在网格上，而不是跟着按住时长一路漂");
+            assertEquals(3, sounding.size(), describe(view.activeTrack()));
+            assertEquals(java.util.List.of(0L, 240L, 480L),
+                    java.util.List.of(sounding.get(0).startTick(), sounding.get(1).startTick(),
+                            sounding.get(2).startTick()),
+                    "三条音应当首尾相接且落在网格上：" + describe(view.activeTrack()));
+            for (Note note : sounding) {
+                assertEquals(240, note.durationTicks(),
+                        "100ms 吸附成一个八分音符：" + describe(view.activeTrack()));
+            }
         });
     }
 
     @Test
-    void aLongPauseReanchorsAtTheCursor() throws Exception {
+    void aLongPauseDoesNotPushTheNextNoteAway() throws Exception {
         withDocument((app, view, dispatcher) -> {
             long[] now = { 0 };
             view.setNanoClockForTesting(() -> now[0]);
@@ -438,6 +451,574 @@ class InputModeTest {
             }
             assertEquals(cursorAfterFirst, maxStart, "停顿之后应从光标处继续，而不是按 3 秒的时间差往后摆");
         });
+    }
+
+    // ---------------------------------------------------------------- 脚手架
+
+    @Test
+    void backToBackPressesStayConnectedUnderAssist() throws Exception {
+        withDocument((app, view, dispatcher) -> {
+            long[] now = { 0 };
+            view.setNanoClockForTesting(() -> now[0]);
+            view.document().tempoMap().setBpm(0, 125); // 1 tick = 1000µs
+            SwingUtilities.invokeAndWait(() -> {
+                view.grid().setResolution(com.example.mideditor.domain.GridSettings.Resolution.EIGHTH);
+                view.setInputMode(true);
+                view.setInputBeatSnap(true);
+            });
+
+            // 按住 2.9 秒 → 松开 → 150ms 后再按住 2.9 秒（同一个音）
+            now[0] = 0;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_SPACE, 0));
+            now[0] = 2_900_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_SPACE, 0));
+            now[0] = 3_050_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_SPACE, 0));
+            now[0] = 5_950_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_SPACE, 0));
+
+            java.util.List<Note> sounding = new java.util.ArrayList<>();
+            for (Note note : view.activeTrack().notes()) {
+                if (note.isRest()) {
+                    continue;
+                }
+                sounding.add(note);
+            }
+            assertEquals(2, sounding.size(), "应当正好两条平行线");
+            assertEquals(sounding.get(0).endTick(), sounding.get(1).startTick(),
+                    "第二下应当直接接在上一条末尾：" + describe(view.activeTrack()));
+        });
+    }
+
+    @Test
+    void doubleTapStaysConnectedAcrossTypicalSpeeds() throws Exception {
+        withDocument((app, view, dispatcher) -> {
+            long[] now = { 0 };
+            view.setNanoClockForTesting(() -> now[0]);
+            // 60 BPM：1 tick = 2083µs，1/16 网格 = 120 tick ≈ 250ms
+            SwingUtilities.invokeAndWait(() -> {
+                view.grid().setResolution(com.example.mideditor.domain.GridSettings.Resolution.SIXTEENTH);
+            });
+
+            long[] holds = { 300, 900, 3000 };
+            // 间隔多长都不算休止符：输入模式只按“按住时长”下音，不拿间隔做文章
+            long[] gaps = { 0, 60, 150, 250, 400 };
+            for (long holdMs : holds) {
+                for (long gapMs : gaps) {
+                    Track track = newTrack(view);
+                    SwingUtilities.invokeAndWait(() -> {
+                        view.setInputMode(true);
+                        view.setInputBeatSnap(true);
+                    });
+                    now[0] = 0;
+                    dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_SPACE, 0));
+                    now[0] = holdMs * 1_000_000L;
+                    dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_SPACE, 0));
+                    now[0] = (holdMs + gapMs) * 1_000_000L;
+                    dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_SPACE, 0));
+                    now[0] = (holdMs * 2 + gapMs) * 1_000_000L;
+                    dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_SPACE, 0));
+
+                    java.util.List<Note> sounding = new java.util.ArrayList<>();
+                    for (Note note : track.notes()) {
+                        if (!note.isRest()) {
+                            sounding.add(note);
+                        }
+                    }
+                    String where = "hold=" + holdMs + "ms gap=" + gapMs + "ms -> " + describe(track);
+                    assertEquals(2, sounding.size(), where);
+                    for (Note note : track.notes()) {
+                        assertFalse(note.isRest(), "按两下不该冒出休止符：" + where);
+                    }
+                    assertEquals(sounding.get(0).endTick(), sounding.get(1).startTick(),
+                            "两下必须首尾相连：" + where);
+                    SwingUtilities.invokeAndWait(() -> view.setInputMode(false));
+                }
+            }
+        });
+    }
+
+    /**
+     * 长音之后紧接着再按同一个音：人工的「松开 → 再按下」间隔有零点几秒很正常，
+     * 连奏容差跟着音长走，这段空隙不能被拆成休止符。
+     */
+    @Test
+    void longHeldNotesStayConnectedWhateverThePause() throws Exception {
+        withDocument((app, view, dispatcher) -> {
+            long[] now = { 0 };
+            view.setNanoClockForTesting(() -> now[0]);
+            // 60 BPM（默认）：3 秒 = 1440 tick = 1/16 的 12 格
+            com.example.mideditor.domain.GridSettings.Resolution[] resolutions = {
+                    com.example.mideditor.domain.GridSettings.Resolution.SIXTEENTH,
+                    com.example.mideditor.domain.GridSettings.Resolution.THIRTY_SECOND,
+                    com.example.mideditor.domain.GridSettings.Resolution.QUARTER,
+            };
+            long[] gaps = { 0, 200, 400, 600, 800, 1100, 1400 };
+            for (var resolution : resolutions) {
+                for (long gapMs : gaps) {
+                    Track track = newTrack(view);
+                    SwingUtilities.invokeAndWait(() -> {
+                        view.grid().setResolution(resolution);
+                        view.setInputMode(true);
+                        view.setInputBeatSnap(true);
+                    });
+                    long holdMs = 3000;
+                    now[0] = 0;
+                    dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_SPACE, 0));
+                    now[0] = holdMs * 1_000_000L;
+                    dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_SPACE, 0));
+                    now[0] = (holdMs + gapMs) * 1_000_000L;
+                    dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_SPACE, 0));
+                    now[0] = (holdMs * 2 + gapMs) * 1_000_000L;
+                    dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_SPACE, 0));
+                    SwingUtilities.invokeAndWait(() -> view.setInputMode(false));
+
+                    String where = resolution.label() + " gap=" + gapMs + "ms -> " + describe(track);
+                    java.util.List<Note> sounding = new java.util.ArrayList<>();
+                    for (Note note : track.notes()) {
+                        assertFalse(note.isRest(), "长音之后紧接着再按不该冒出休止符：" + where);
+                        sounding.add(note);
+                    }
+                    assertEquals(2, sounding.size(), where);
+                    assertEquals(sounding.get(0).endTick(), sounding.get(1).startTick(),
+                            "两条必须首尾相连：" + where);
+                }
+            }
+        });
+    }
+
+    /**
+     * 细网格（1/32）下两点：连奏容差不能被「两格」的宽度卡死——两格只有 250ms，
+     * 人手按得快也要 300~400ms。
+     */
+    @Test
+    void fineGridDoesNotSplitQuickDoubleTapsWithRests() throws Exception {
+        withDocument((app, view, dispatcher) -> {
+            long[] now = { 0 };
+            view.setNanoClockForTesting(() -> now[0]);
+            for (long gapMs : new long[] { 300, 400, 500, 600 }) {
+                Track track = newTrack(view);
+                SwingUtilities.invokeAndWait(() -> {
+                    view.grid().setResolution(
+                            com.example.mideditor.domain.GridSettings.Resolution.THIRTY_SECOND);
+                    view.setInputMode(true);
+                    view.setInputBeatSnap(true);
+                });
+                now[0] = 0;
+                dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_SPACE, 0));
+                now[0] = 200_000_000L;
+                dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_SPACE, 0));
+                now[0] = (200 + gapMs) * 1_000_000L;
+                dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_SPACE, 0));
+                now[0] = (400 + gapMs) * 1_000_000L;
+                dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_SPACE, 0));
+                SwingUtilities.invokeAndWait(() -> view.setInputMode(false));
+
+                String where = "1/32 gap=" + gapMs + "ms -> " + describe(track);
+                java.util.List<Note> sounding = new java.util.ArrayList<>();
+                for (Note note : track.notes()) {
+                    assertFalse(note.isRest(), "细网格下快按两下不该冒出休止符：" + where);
+                    sounding.add(note);
+                }
+                assertEquals(2, sounding.size(), where);
+                assertEquals(sounding.get(0).endTick(), sounding.get(1).startTick(),
+                        "两条必须首尾相连：" + where);
+            }
+        });
+    }
+
+    /** 在新的音轨上跑一个组合，免得上一组的音/休止符混进来。 */
+    private static Track newTrack(MidiDocumentView view) throws Exception {
+        Track[] holder = new Track[1];
+        SwingUtilities.invokeAndWait(() -> {
+            view.addTrack();
+            holder[0] = view.activeTrack();
+        });
+        return holder[0];
+    }
+
+    /**
+     * 不变量审计：在各种网格档位下敲一串节奏，文档里不允许出现
+     * ①任何自动生成的休止符；②互相重叠的平行线；③比按住时长更长的音。
+     */
+    @Test
+    void assistNeverInsertsRestsOrOverlaps() throws Exception {
+        withDocument((app, view, dispatcher) -> {
+            long[] now = { 0 };
+            view.setNanoClockForTesting(() -> now[0]);
+            // {按住 ms, 间隔 ms} —— 混着长音、断奏、快连按
+            long[][] script = {
+                    { 300, 80 }, { 1200, 0 }, { 450, 250 }, { 2000, 120 },
+                    { 700, 400 }, { 150, 60 }, { 900, 300 }, { 2400, 150 },
+            };
+            com.example.mideditor.domain.GridSettings.Resolution[] resolutions = {
+                    com.example.mideditor.domain.GridSettings.Resolution.QUARTER,
+                    com.example.mideditor.domain.GridSettings.Resolution.EIGHTH,
+                    com.example.mideditor.domain.GridSettings.Resolution.SIXTEENTH,
+                    com.example.mideditor.domain.GridSettings.Resolution.EIGHTH_TRIPLET,
+            };
+            for (com.example.mideditor.domain.GridSettings.Resolution resolution : resolutions) {
+                Track track = newTrack(view);
+                SwingUtilities.invokeAndWait(() -> {
+                    view.grid().setResolution(resolution);
+                    view.setInputMode(true);
+                    view.setInputBeatSnap(true);
+                });
+                long unit = resolution.ticksPerGrid(view.document().ppq());
+                long timeMs = 0;
+                for (long[] step : script) {
+                    now[0] = timeMs * 1_000_000L;
+                    dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_SPACE, 0));
+                    now[0] = (timeMs + step[0]) * 1_000_000L;
+                    dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_SPACE, 0));
+                    timeMs += step[0] + step[1];
+                }
+                SwingUtilities.invokeAndWait(() -> view.setInputMode(false));
+
+                String where = resolution.label() + " -> " + describe(track);
+                for (Note note : track.notes()) {
+                    assertFalse(note.isRest(), "输入模式不得自己插休止符（单位 " + unit + " tick）：" + where);
+                    assertEquals(0, note.durationTicks() % unit,
+                            "时值必须吸附成整数格（" + unit + " tick）：" + where);
+                    assertEquals(0, note.startTick() % unit,
+                            "起点必须落在网格线上（" + unit + " tick）：" + where);
+                }
+                long previousEnd = 0;
+                for (Note note : track.notes()) {
+                    assertTrue(note.startTick() >= previousEnd, "平行线不能互相重叠：" + where);
+                    previousEnd = note.endTick();
+                }
+            }
+        });
+    }
+
+    private static String describe(Track track) {
+        StringBuilder sb = new StringBuilder();
+        for (Note note : track.notes()) {
+            sb.append(note.isRest() ? "休止" : "音").append('[')
+                    .append(note.startTick()).append("..").append(note.endTick()).append("] ");
+        }
+        return sb.toString();
+    }
+
+    // ------------------------------------------------ 小键盘数字输入（简谱）
+
+    /** 小键盘 1~7 就是简谱的 do~si：按下立刻切音高并开始输入，松手按按住时长落成平行线。 */
+    @Test
+    void numpadDigitsEnterTheDegreeInTheCursorOctave() throws Exception {
+        withDocument((app, view, dispatcher) -> {
+            long[] now = { 0 };
+            view.setNanoClockForTesting(() -> now[0]);
+            SwingUtilities.invokeAndWait(() -> view.setInputMode(true));
+            int base = Math.floorDiv(view.inputCursorPitch(), 12) * 12;
+            int[] semitones = { 0, 2, 4, 5, 7, 9, 11 };
+
+            long timeMs = 0;
+            for (int degree = 1; degree <= 7; degree++) {
+                int code = KeyEvent.VK_NUMPAD0 + degree;
+                now[0] = timeMs * 1_000_000L;
+                assertTrue(dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, code, 0)),
+                        "输入模式下小键盘数字应当被接住");
+                assertEquals(base + semitones[degree - 1], view.inputCursorPitch(),
+                        "按下 " + degree + " 光标立刻切到这个简谱音");
+                assertTrue(view.inputNoteHeld(), "不用按空格：按下数字就开始输入");
+                now[0] = (timeMs + 240) * 1_000_000L;
+                assertTrue(dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, code, 0)),
+                        "松手也要接住");
+                timeMs += 240;
+            }
+
+            java.util.List<Note> sounding = soundingNotes(view.activeTrack());
+            assertEquals(7, sounding.size(), "七个数字应当落成七条平行线：" + describe(view.activeTrack()));
+            long previousEnd = 0;
+            for (int i = 0; i < sounding.size(); i++) {
+                Note note = sounding.get(i);
+                assertEquals(base + semitones[i], note.pitch(), "第 " + (i + 1) + " 个数字的音高");
+                assertTrue(note.durationTicks() > 50,
+                        "按住 240ms 不该只落成一两个 tick：" + note.durationTicks());
+                if (i > 0) {
+                    assertEquals(previousEnd, note.startTick(), "小键盘连敲应当首尾相连、不留缝");
+                }
+                previousEnd = note.endTick();
+            }
+            assertEquals(previousEnd, view.inputCursorTick(), "光标跟到最后一条的末尾");
+        });
+    }
+
+    /** 小键盘 +/- 挪八度，而且只作用于接下来按下的那个数字：输完一个音就归零。 */
+    @Test
+    void numpadPlusMinusShiftTheOctaveAndResetAfterEachNote() throws Exception {
+        withDocument((app, view, dispatcher) -> {
+            long[] now = { 0 };
+            view.setNanoClockForTesting(() -> now[0]);
+            SwingUtilities.invokeAndWait(() -> view.setInputMode(true));
+            int octave = Math.floorDiv(view.inputCursorPitch(), 12);
+
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_ADD, 0));
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_ADD, 0));
+            assertEquals(2, view.inputOctaveJump(), "小键盘 + 每按一次加一个八度");
+
+            now[0] = 0;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_NUMPAD5, 0));
+            assertEquals((octave + 2) * 12 + 7, view.inputCursorPitch(), "5 = sol，再高两个八度");
+            now[0] = 240_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_NUMPAD5, 0));
+            assertEquals(0, view.inputOctaveJump(), "输完一个音 jump 归零，不复用");
+
+            // 光标已经停在高两个八度的那个八度里：这一下不该再往上跑
+            now[0] = 400_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_NUMPAD3, 0));
+            assertEquals((octave + 2) * 12 + 4, view.inputCursorPitch(),
+                    "jump 若没归零，这里会跑到 (octave+4) 去");
+            now[0] = 640_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_NUMPAD3, 0));
+
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_SUBTRACT, 0));
+            assertEquals(-1, view.inputOctaveJump(), "小键盘 - 降一个八度");
+            now[0] = 800_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_NUMPAD1, 0));
+            assertEquals((octave + 1) * 12, view.inputCursorPitch(), "1 = do，降回来一个八度");
+            now[0] = 1_040_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_NUMPAD1, 0));
+
+            java.util.List<Note> sounding = soundingNotes(view.activeTrack());
+            assertEquals(3, sounding.size(), describe(view.activeTrack()));
+            assertEquals((octave + 2) * 12 + 7, sounding.get(0).pitch());
+            assertEquals((octave + 2) * 12 + 4, sounding.get(1).pitch());
+            assertEquals((octave + 1) * 12, sounding.get(2).pitch());
+        });
+    }
+
+    /** 按住大键盘 +/= 时数字高一个八度，-/_ 低一个八度；再按住 Ctrl 则两个八度。 */
+    @Test
+    void holdingMainKeyboardPlusMinusShiftsTheNumpadOctave() throws Exception {
+        withDocument((app, view, dispatcher) -> {
+            long[] now = { 0 };
+            view.setNanoClockForTesting(() -> now[0]);
+            SwingUtilities.invokeAndWait(() -> view.setInputMode(true));
+            int base = Math.floorDiv(view.inputCursorPitch(), 12) * 12;
+            int ctrl = java.awt.event.InputEvent.CTRL_DOWN_MASK;
+
+            // 按住 =（+）：下一个数字整体高一个八度
+            assertTrue(dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_EQUALS, 0)));
+            assertEquals(1, view.inputOctaveHold(), "按住 = 应当挂上 +1 八度");
+            now[0] = 0;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_NUMPAD1, 0));
+            assertEquals(base + 12, view.inputCursorPitch(), "= 按着时 1 落在高八度");
+            now[0] = 240_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_NUMPAD1, 0));
+
+            // 还按着 =：下一个数字照样高八度（按物理键状态判定，不随音符归零）
+            moveCursorPitchTo(view, base);
+            now[0] = 400_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_NUMPAD2, 0));
+            assertEquals(base + 14, view.inputCursorPitch(), "= 一直按着，2 也高八度");
+            now[0] = 640_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_NUMPAD2, 0));
+
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_EQUALS, 0));
+            assertEquals(0, view.inputOctaveHold(), "松开 = 就回到默认八度");
+
+            // 按住 -（_）：低一个八度
+            moveCursorPitchTo(view, base);
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_MINUS, 0));
+            assertEquals(-1, view.inputOctaveHold(), "按住 - 应当挂上 -1 八度");
+            now[0] = 800_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_NUMPAD5, 0));
+            assertEquals(base - 5, view.inputCursorPitch(), "- 按着时 5 落在低八度");
+            now[0] = 1_040_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_NUMPAD5, 0));
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_MINUS, 0));
+
+            // Ctrl + +/- + 数字 = 两个八度
+            moveCursorPitchTo(view, base);
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_EQUALS, ctrl));
+            now[0] = 1_200_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_NUMPAD1, ctrl));
+            assertEquals(base + 24, view.inputCursorPitch(), "Ctrl + = + 1 = 高两个八度");
+            now[0] = 1_440_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_NUMPAD1, ctrl));
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_EQUALS, 0));
+
+            moveCursorPitchTo(view, base);
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_MINUS, ctrl));
+            now[0] = 1_600_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_NUMPAD1, ctrl));
+            assertEquals(base - 24, view.inputCursorPitch(), "Ctrl + - + 1 = 低两个八度");
+            now[0] = 1_840_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_NUMPAD1, ctrl));
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_MINUS, 0));
+
+            java.util.List<Note> sounding = soundingNotes(view.activeTrack());
+            int[] expected = { base + 12, base + 14, base - 5, base + 24, base - 24 };
+            assertEquals(expected.length, sounding.size(), describe(view.activeTrack()));
+            for (int i = 0; i < expected.length; i++) {
+                assertEquals(expected[i], sounding.get(i).pitch(), "第 " + (i + 1) + " 条音高");
+            }
+        });
+    }
+
+    /** 每输入一条，刚落的这条就是当前选中（换选中，不累加）。 */
+    @Test
+    void everyInputNoteBecomesTheSelection() throws Exception {
+        withDocument((app, view, dispatcher) -> {
+            long[] now = { 0 };
+            view.setNanoClockForTesting(() -> now[0]);
+            SwingUtilities.invokeAndWait(() -> view.setInputMode(true));
+
+            now[0] = 0;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_SPACE, 0));
+            now[0] = 240_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_SPACE, 0));
+            java.util.List<Note> first = view.selection().resolve(view.document());
+            assertEquals(1, first.size(), "空格输入的这条应当被选中");
+            Note firstNote = soundingNotes(view.activeTrack()).get(0);
+            assertEquals(firstNote.id(), first.get(0).id(), "选中的就是刚输入的那条");
+
+            // 小键盘输入同样选中新的一条，且只换不累加
+            now[0] = 400_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_NUMPAD3, 0));
+            now[0] = 640_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_NUMPAD3, 0));
+            java.util.List<Note> second = view.selection().resolve(view.document());
+            assertEquals(1, second.size(), "选中应当只跟着最新那条");
+            assertEquals(soundingNotes(view.activeTrack()).get(1).id(), second.get(0).id(),
+                    "小键盘输入的这条成了新的选中");
+            assertFalse(view.selection().contains(firstNote), "上一条不该还选着");
+
+            // 退出输入模式不清选中（Esc 的语义不变）
+            SwingUtilities.invokeAndWait(() -> view.setInputMode(false));
+            assertEquals(1, view.selection().resolve(view.document()).size(),
+                    "退出输入模式不该顺手清掉刚输入的选中");
+        });
+    }
+
+    /** 每次进入输入模式，红色光标都落在当前可见频谱的正中间（横向中点、纵向泳道中间那一行）。 */
+    @Test
+    void enteringInputModePutsTheCursorInTheMiddleOfTheVisibleSpectrum() throws Exception {
+        withDocument((app, view, dispatcher) -> {
+            SwingUtilities.invokeAndWait(() -> {
+                var roll = view.pianoRoll();
+                roll.scrollPane().getViewport().setSize(1000, 700);
+                roll.canvas().setSize(6000, 800);
+                roll.scrollPane().getViewport().setViewPosition(new java.awt.Point(900, 0));
+            });
+            java.awt.Rectangle visible = view.pianoRoll().visibleRect();
+            assertTrue(visible.width > 100, "前提：视口要有尺寸，实际 " + visible);
+            int ppq = view.document().ppq();
+            long expectedTick = view.grid().snap(
+                    view.pianoRoll().timeline().tickAtX(visible.x + visible.width / 2, ppq), ppq);
+            int expectedPitch = view.pianoRoll().pitchAt(view.activeTrack(), 0,
+                    view.pianoRoll().laneTop(0) + view.pianoRoll().laneHeight() / 2);
+
+            SwingUtilities.invokeAndWait(() -> view.setInputMode(true));
+            assertEquals(expectedTick, view.inputCursorTick(), "横向落在视口中点（吸附网格）");
+            assertEquals(expectedPitch, view.inputCursorPitch(), "纵向落在泳道中间那一行");
+            assertTrue(view.inputCursorTick() > 0, "滚过去之后不该还停在播放头 0");
+
+            // 退出、滚动到别处再进来：照样重新居中
+            long first = view.inputCursorTick();
+            SwingUtilities.invokeAndWait(() -> {
+                view.setInputMode(false);
+                view.pianoRoll().scrollPane().getViewport()
+                        .setViewPosition(new java.awt.Point(3000, 0));
+            });
+            java.awt.Rectangle moved = view.pianoRoll().visibleRect();
+            long expectedAgain = view.grid().snap(
+                    view.pianoRoll().timeline().tickAtX(moved.x + moved.width / 2, ppq), ppq);
+            SwingUtilities.invokeAndWait(() -> view.setInputMode(true));
+            assertEquals(expectedAgain, view.inputCursorTick(), "重新进入同样落在新的视口中点");
+            assertTrue(view.inputCursorTick() > first, "新视口更靠右，光标也该更靠右");
+        });
+    }
+
+    /** 把红色光标挪到指定音高（测试里用来把八度基准摆正）。 */
+    private static void moveCursorPitchTo(MidiDocumentView view, int pitch) throws Exception {
+        int delta = pitch - view.inputCursorPitch();
+        if (delta != 0) {
+            SwingUtilities.invokeAndWait(() -> view.moveInputCursor(0, delta));
+        }
+    }
+
+    /** 两套输入并存：空格写的音和小键盘写的音接着往下写，不打架。 */
+    @Test
+    void numpadAndSpaceInputsChainTogether() throws Exception {
+        withDocument((app, view, dispatcher) -> {
+            long[] now = { 0 };
+            view.setNanoClockForTesting(() -> now[0]);
+            SwingUtilities.invokeAndWait(() -> view.setInputMode(true));
+            int base = Math.floorDiv(view.inputCursorPitch(), 12) * 12;
+
+            now[0] = 0;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_SPACE, 0));
+            now[0] = 240_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_SPACE, 0));
+
+            now[0] = 400_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_NUMPAD3, 0));
+            now[0] = 640_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_NUMPAD3, 0));
+
+            java.util.List<Note> sounding = soundingNotes(view.activeTrack());
+            assertEquals(2, sounding.size(), "空格和小键盘各写一条：" + describe(view.activeTrack()));
+            assertEquals(base, sounding.get(0).pitch(), "空格那条还是光标原来的音高");
+            assertEquals(base + 4, sounding.get(1).pitch(), "小键盘 3 = mi");
+            assertEquals(sounding.get(0).endTick(), sounding.get(1).startTick(),
+                    "小键盘输入接着空格输入继续往下写，中间不留缝");
+        });
+    }
+
+    @Test
+    void numpadIsNotConsumedWhenInputModeIsOff() throws Exception {
+        withDocument((app, view, dispatcher) -> {
+            KeyEvent press = key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_NUMPAD3, 0);
+            assertFalse(dispatcher.dispatchKeyEvent(press), "输入模式没开时小键盘数字要放行");
+            assertFalse(press.isConsumed());
+            assertTrue(soundingNotes(view.activeTrack()).isEmpty(), "没开输入模式不该写进音符");
+        });
+    }
+
+    /** Ctrl+U / Ctrl+L：光标整体上 / 下移一个八度（只挪光标，不动时间、不出音符）。 */
+    @Test
+    void ctrlUMovesTheCursorUpAnOctaveAndCtrlLDown() throws Exception {
+        withDocument((app, view, dispatcher) -> {
+            SwingUtilities.invokeAndWait(() -> view.setInputMode(true));
+            int ctrl = java.awt.event.InputEvent.CTRL_DOWN_MASK;
+            int pitch0 = view.inputCursorPitch();
+            long tick0 = view.inputCursorTick();
+
+            KeyEvent up = key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_U, ctrl);
+            assertTrue(dispatcher.dispatchKeyEvent(up), "输入模式下 Ctrl+U 应当被接住");
+            assertTrue(up.isConsumed());
+            assertEquals(pitch0 + 12, view.inputCursorPitch(), "Ctrl+U 上移一个八度");
+            assertEquals(tick0, view.inputCursorTick(), "只动音高，不动时间");
+
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_L, ctrl));
+            assertEquals(pitch0, view.inputCursorPitch(), "Ctrl+L 下移一个八度");
+            assertEquals(tick0, view.inputCursorTick(), "仍然不动时间");
+
+            // 带 Shift 的 Ctrl+Shift+L 仍是「循环域＝选区」，输入模式不抢
+            KeyEvent loopToSelection = key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_L,
+                    ctrl | java.awt.event.InputEvent.SHIFT_DOWN_MASK);
+            assertFalse(dispatcher.dispatchKeyEvent(loopToSelection), "Ctrl+Shift+L 要放行");
+            assertEquals(pitch0, view.inputCursorPitch(), "Ctrl+Shift+L 不该动光标");
+
+            // 裸 U / L 不归输入模式管（留给命令系统）
+            KeyEvent plain = key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_U, 0);
+            assertFalse(dispatcher.dispatchKeyEvent(plain), "不带 Ctrl 的 U 要放行");
+            assertEquals(pitch0, view.inputCursorPitch(), "裸 U 不该动光标");
+            assertTrue(soundingNotes(view.activeTrack()).isEmpty(), "挪光标不该写出音符");
+        });
+    }
+
+    private static java.util.List<Note> soundingNotes(Track track) {
+        java.util.List<Note> list = new java.util.ArrayList<>();
+        for (Note note : track.notes()) {
+            if (!note.isRest()) {
+                list.add(note);
+            }
+        }
+        return list;
     }
 
     // ---------------------------------------------------------------- 脚手架

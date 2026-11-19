@@ -249,8 +249,8 @@ public final class DocumentManager {
         }
         Object[] options = { "保存", "不保存", "取消" };
         int choice = JOptionPane.showOptionDialog(app.mainFrame(),
-                "文档「" + session.document().displayName() + "」有未保存的修改。是否保存？",
-                "未保存的更改",
+                "是否保存对「" + session.document().displayName() + "」的修改？",
+                "midEditor",
                 JOptionPane.YES_NO_CANCEL_OPTION,
                 JOptionPane.WARNING_MESSAGE,
                 null, options, options[0]);
