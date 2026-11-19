@@ -446,6 +446,61 @@ public final class PianoRollView extends JPanel {
         int x2 = timeline.xAtTick(currentTick, ppq);
         canvas.repaint(Math.min(x1, x2) - 8, 0, Math.abs(x2 - x1) + 16, canvas.getHeight());
         ruler.repaint(Math.min(x1, x2) - 8, 0, Math.abs(x2 - x1) + 16, ruler.getHeight());
+        repaintHighlightChangedNotes(previousTick, currentTick);
+    }
+
+    /** 这条平行线的「发声高亮」会不会因为播放头从 from 走到 to 而翻转（头或尾被跨过）。 */
+    private static boolean highlightChanges(Note note, long from, long to) {
+        return !note.isRest()
+                && ((note.startTick() > from && note.startTick() <= to)
+                        || (note.endTick() > from && note.endTick() <= to));
+    }
+
+    /** 播放头从 fromTick 走到 toTick 时，发声高亮会翻转的平行线（供测试 / 诊断）。 */
+    public java.util.List<Note> highlightChangedNotes(long fromTick, long toTick) {
+        long from = Math.min(fromTick, toTick);
+        long to = Math.max(fromTick, toTick);
+        java.util.List<Note> changed = new java.util.ArrayList<>();
+        if (from == to) {
+            return changed;
+        }
+        for (Track track : host.document().tracks()) {
+            for (Note note : track.notes()) {
+                if (highlightChanges(note, from, to)) {
+                    changed.add(note);
+                }
+            }
+        }
+        return changed;
+    }
+
+    /**
+     * 窄带重绘只盖住播放头附近 ±8px，所以当播放头跨过一条平行线的头 / 尾时，
+     * 那条线只有被盖住的那一小段换了颜色，剩下的大段仍是旧颜色
+     * （用户看到的现象：每条线末尾总有固定一小段不亮 / 或者走过去了还亮着）。
+     * 这里把高亮真正翻转的那几条线整条重刷一遍。
+     */
+    public void repaintHighlightChangedNotes(long fromTick, long toTick) {
+        long from = Math.min(fromTick, toTick);
+        long to = Math.max(fromTick, toTick);
+        if (from == to) {
+            return;
+        }
+        var document = host.document();
+        int ppq = document.ppq();
+        for (int laneIndex = 0; laneIndex < document.tracks().size(); laneIndex++) {
+            Track track = document.tracks().get(laneIndex);
+            for (Note note : track.notes()) {
+                if (!highlightChanges(note, from, to)) {
+                    continue;
+                }
+                int left = timeline.xAtTick(note.startTick(), ppq) - 2;
+                int right = timeline.xAtTick(note.endTick(), ppq) + 2;
+                int top = rowTop(track, laneIndex, note.pitch()) - 2;
+                int bottom = rowBottom(track, laneIndex, note.pitch()) + 2;
+                canvas.repaint(left, top, Math.max(1, right - left), Math.max(1, bottom - top));
+            }
+        }
     }
 
     public void scrollToTick(long tick) {

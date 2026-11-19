@@ -94,7 +94,8 @@ class EditingWorkflowTest {
             assertTrue(app.registry().action(AppCommandIds.EDIT_DELETE).isEnabled());
             assertTrue(app.registry().action(AppCommandIds.EDIT_UNDO).isEnabled());
 
-            // 删除 + 撤销
+            // 删除 + 撤销（先把两条都选上：拆分出来的两半现在是各自独立的一条）
+            run(() -> view.selection().setAll(new java.util.ArrayList<>(track.notes())));
             run(() -> view.deleteSelection());
             assertEquals(0, sounding(track));
             run(() -> app.router().dispatch(AppCommandIds.EDIT_UNDO));

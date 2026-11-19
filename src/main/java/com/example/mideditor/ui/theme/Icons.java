@@ -32,6 +32,8 @@ public final class Icons {
     public static final Icon DELETE = glyph("delete");
     public static final Icon ADD = glyph("add");
     public static final Icon GRID = glyph("grid");
+    public static final Icon INPUT_MODE = glyph("input");
+    public static final Icon BEAT_SNAP = glyph("snap");
 
     private Icons() {
     }
@@ -102,6 +104,14 @@ public final class Icons {
 
     public static Icon grid() {
         return GRID;
+    }
+
+    public static Icon inputMode() {
+        return INPUT_MODE;
+    }
+
+    public static Icon beatSnap() {
+        return BEAT_SNAP;
     }
 
     private static Icon glyph(String kind) {
@@ -249,6 +259,20 @@ public final class Icons {
                     g2.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
                     g2.drawLine(8, 4, 8, 12);
                     g2.drawLine(4, 8, 12, 8);
+                }
+                case "snap" -> {
+                    // 一根拍线 + 一个红点贴上去（吸附）
+                    g2.setColor(ink);
+                    g2.drawLine(9, 2, 9, 14);
+                    g2.setColor(new Color(0xD8382B));
+                    g2.fillOval(3, 6, 5, 5);
+                }
+                case "input" -> {
+                    // 红色圆点（光标）+ 一根短横线（输入出来的长度）
+                    g2.setColor(new Color(0xD8382B));
+                    g2.fillOval(2, 6, 6, 6);
+                    g2.setColor(accent);
+                    g2.drawLine(10, 9, 14, 9);
                 }
                 case "grid" -> {
                     g2.setColor(new Color(0x27313D));

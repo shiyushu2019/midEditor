@@ -24,20 +24,14 @@ final class EditCommands {
 
         AppCommand undo = new AppCommand(AppCommandIds.EDIT_UNDO, "撤销", CommandScope.DOCUMENT,
                 FileCommands.key(KeyEvent.VK_Z, InputEvent.CTRL_DOWN_MASK),
-                ctx -> {
-                    ctx.document().editStack().undo();
-                    ctx.document().afterEdit(true);
-                },
+                ctx -> ctx.document().undo(),
                 ctx -> ctx.hasDocument() && ctx.document().editStack().canUndo(), null);
         undo.putIcon(Icons.undo());
         registry.register(undo);
 
         AppCommand redo = new AppCommand(AppCommandIds.EDIT_REDO, "重做", CommandScope.DOCUMENT,
                 FileCommands.key(KeyEvent.VK_Z, InputEvent.CTRL_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK),
-                ctx -> {
-                    ctx.document().editStack().redo();
-                    ctx.document().afterEdit(true);
-                },
+                ctx -> ctx.document().redo(),
                 ctx -> ctx.hasDocument() && ctx.document().editStack().canRedo(), null);
         redo.putIcon(Icons.redo());
         registry.register(redo);
@@ -96,6 +90,39 @@ final class EditCommands {
                 ctx -> ctx.document().splitSelectedAt(ctx.document().playheadTick()),
                 CommandContext::hasSelection, null));
 
+        // 输入模式：WASD 移动光标、Q 试听、空格按住多久就输入多长（Esc 退出）
+        // Ctrl+I 三态循环：关 → 输入模式＋节奏辅助 → 输入模式 → 关
+        AppCommand inputMode = new AppCommand(AppCommandIds.EDIT_INPUT_MODE, "输入模式", CommandScope.DOCUMENT,
+                FileCommands.key(KeyEvent.VK_I, InputEvent.CTRL_DOWN_MASK),
+                ctx -> {
+                    if (TextFocusGuard.isTextEditing()) {
+                        return;
+                    }
+                    MidiDocumentView view = ctx.document();
+                    if (!view.inputMode()) {
+                        view.setInputMode(true);
+                        view.setInputBeatSnap(true);
+                    } else if (view.inputBeatSnap()) {
+                        view.setInputBeatSnap(false);
+                    } else {
+                        view.setInputMode(false);
+                    }
+                },
+                CommandContext::hasDocument,
+                ctx -> ctx.hasDocument() && ctx.document().inputMode());
+        inputMode.putIcon(Icons.inputMode());
+        registry.register(inputMode);
+
+        // 输入模式的节奏辅助（可选开关）：起点 / 时值吸附到拍
+        AppCommand beatSnap = new AppCommand(AppCommandIds.EDIT_INPUT_BEAT_SNAP, "节奏辅助", CommandScope.DOCUMENT,
+                null,
+                ctx -> ctx.document().toggleInputBeatSnap(),
+                ctx -> ctx.hasDocument() && ctx.document().inputMode(),
+                ctx -> ctx.hasDocument() && ctx.document().inputBeatSnap());
+        beatSnap.putIcon(Icons.beatSnap());
+        beatSnap.putShortDescription("节奏辅助：输入的音符吸附到当前网格分辨率（要八分音符就把网格选成 1/8）");
+        registry.register(beatSnap);
+
         // ---- 平行线
         registry.register(new AppCommand(AppCommandIds.NOTE_ADD, "添加平行线", CommandScope.TRACK,
                 null,
@@ -118,7 +145,7 @@ final class EditCommands {
                 CommandContext::hasSelection, null));
 
         registry.register(new AppCommand(AppCommandIds.NOTE_MOVE_UP, "上移半音", CommandScope.SELECTION,
-                FileCommands.key(KeyEvent.VK_UP, 0),
+                null,
                 ctx -> {
                     if (TextFocusGuard.isTextEditing()) {
                         return;
@@ -127,7 +154,7 @@ final class EditCommands {
                 }, CommandContext::hasSelection, null));
 
         registry.register(new AppCommand(AppCommandIds.NOTE_MOVE_DOWN, "下移半音", CommandScope.SELECTION,
-                FileCommands.key(KeyEvent.VK_DOWN, 0),
+                null,
                 ctx -> {
                     if (TextFocusGuard.isTextEditing()) {
                         return;
@@ -136,7 +163,7 @@ final class EditCommands {
                 }, CommandContext::hasSelection, null));
 
         registry.register(new AppCommand(AppCommandIds.NOTE_MOVE_LEFT, "左移网格", CommandScope.SELECTION,
-                FileCommands.key(KeyEvent.VK_LEFT, 0),
+                null,
                 ctx -> {
                     if (TextFocusGuard.isTextEditing()) {
                         return;
@@ -146,7 +173,7 @@ final class EditCommands {
                 CommandContext::hasSelection, null));
 
         registry.register(new AppCommand(AppCommandIds.NOTE_MOVE_RIGHT, "右移网格", CommandScope.SELECTION,
-                FileCommands.key(KeyEvent.VK_RIGHT, 0),
+                null,
                 ctx -> {
                     if (TextFocusGuard.isTextEditing()) {
                         return;
@@ -154,6 +181,43 @@ final class EditCommands {
                     ctx.document().moveSelection(gridStep(ctx.document()), 0);
                 },
                 CommandContext::hasSelection, null));
+
+        // 方向键：移动选中框（换选中的对象），每换一次就试听新选中的那条
+        registry.register(new AppCommand(AppCommandIds.NOTE_SELECT_LEFT, "选中左一条", CommandScope.DOCUMENT,
+                FileCommands.key(KeyEvent.VK_LEFT, 0),
+                ctx -> {
+                    if (TextFocusGuard.isTextEditing()) {
+                        return;
+                    }
+                    ctx.document().stepSelection(-1, 0);
+                }, CommandContext::hasDocument, null));
+
+        registry.register(new AppCommand(AppCommandIds.NOTE_SELECT_RIGHT, "选中右一条", CommandScope.DOCUMENT,
+                FileCommands.key(KeyEvent.VK_RIGHT, 0),
+                ctx -> {
+                    if (TextFocusGuard.isTextEditing()) {
+                        return;
+                    }
+                    ctx.document().stepSelection(1, 0);
+                }, CommandContext::hasDocument, null));
+
+        registry.register(new AppCommand(AppCommandIds.NOTE_SELECT_UP, "选中上一条", CommandScope.DOCUMENT,
+                FileCommands.key(KeyEvent.VK_UP, 0),
+                ctx -> {
+                    if (TextFocusGuard.isTextEditing()) {
+                        return;
+                    }
+                    ctx.document().stepSelection(0, 1);
+                }, CommandContext::hasDocument, null));
+
+        registry.register(new AppCommand(AppCommandIds.NOTE_SELECT_DOWN, "选中下一条", CommandScope.DOCUMENT,
+                FileCommands.key(KeyEvent.VK_DOWN, 0),
+                ctx -> {
+                    if (TextFocusGuard.isTextEditing()) {
+                        return;
+                    }
+                    ctx.document().stepSelection(0, -1);
+                }, CommandContext::hasDocument, null));
 
         registry.register(new AppCommand(AppCommandIds.NOTE_LENGTHEN, "拉长平行线", CommandScope.SELECTION,
                 FileCommands.key(KeyEvent.VK_RIGHT, InputEvent.ALT_DOWN_MASK | InputEvent.SHIFT_DOWN_MASK),

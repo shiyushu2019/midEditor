@@ -29,8 +29,10 @@ public final class GridSettings {
         public long ticksPerGrid(int ppq) {
             return switch (this) {
                 case OFF -> 0;
-                case EIGHTH_TRIPLET -> Math.max(1, ppq * 2L / 3L);
-                case SIXTEENTH_TRIPLET -> Math.max(1, ppq / 3L);
+                // 三连音：三个音占两个的时间。1/8 三连音 = 三个八分占一个四分音符 → ppq/3；
+                // 1/16 三连音 = 三个十六分占一个八分音符 → ppq/6。（以前写成了 ppq*2/3 与 ppq/3，整整差一倍）
+                case EIGHTH_TRIPLET -> Math.max(1, ppq / 3L);
+                case SIXTEENTH_TRIPLET -> Math.max(1, ppq / 6L);
                 default -> Math.max(1, ppq / divisions);
             };
         }

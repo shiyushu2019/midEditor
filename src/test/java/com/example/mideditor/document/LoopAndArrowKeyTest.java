@@ -121,7 +121,7 @@ class LoopAndArrowKeyTest {
     }
 
     @Test
-    void arrowKeysMoveSelectedNotes() throws Exception {
+    void arrowKeysMoveTheSelectionBoxAndWasdMovesTheNotes() throws Exception {
         assumeFalse(GraphicsEnvironment.isHeadless(), "需要图形环境");
         AppContext app = new AppContext();
         MainFrame[] holder = new MainFrame[1];
@@ -140,32 +140,36 @@ class LoopAndArrowKeyTest {
             });
             Note note = track.notes().get(0);
 
-            // 画布 WHEN_FOCUSED 必须能解析到同一命令（否则会被滚动面板的箭头绑定抢先）
-            assertEquals(AppCommandIds.NOTE_MOVE_UP, canvas.getInputMap(JComponent.WHEN_FOCUSED)
+            // 画布 WHEN_FOCUSED 的裸方向键现在归「选中框」
+            assertEquals(AppCommandIds.NOTE_SELECT_UP, canvas.getInputMap(JComponent.WHEN_FOCUSED)
                     .get(KeyStroke.getKeyStroke(KeyEvent.VK_UP, 0)));
+            assertEquals(AppCommandIds.NOTE_SELECT_LEFT, canvas.getInputMap(JComponent.WHEN_FOCUSED)
+                    .get(KeyStroke.getKeyStroke(KeyEvent.VK_LEFT, 0)));
+
+            // 移动命令本身还在（WASD 走的就是它们），画布能通过 ActionMap 父链执行
             Action up = canvas.getActionMap().get(AppCommandIds.NOTE_MOVE_UP);
             assertNotNull(up, "画布应能通过 ActionMap 父链执行命令");
 
             SwingUtilities.invokeAndWait(() -> app.refreshCommandStates());
             SwingUtilities.invokeAndWait(() -> up.actionPerformed(
                     new ActionEvent(canvas, ActionEvent.ACTION_PERFORMED, "note.moveUp")));
-            assertEquals(61, note.pitch(), "↑ 应上移半音");
+            assertEquals(61, note.pitch(), "上移半音");
 
             Action down = canvas.getActionMap().get(AppCommandIds.NOTE_MOVE_DOWN);
             SwingUtilities.invokeAndWait(() -> down.actionPerformed(
                     new ActionEvent(canvas, ActionEvent.ACTION_PERFORMED, "note.moveDown")));
-            assertEquals(60, note.pitch(), "↓ 应下移半音");
+            assertEquals(60, note.pitch(), "下移半音");
 
             long startBefore = note.startTick();
             Action right = canvas.getActionMap().get(AppCommandIds.NOTE_MOVE_RIGHT);
             SwingUtilities.invokeAndWait(() -> right.actionPerformed(
                     new ActionEvent(canvas, ActionEvent.ACTION_PERFORMED, "note.moveRight")));
-            assertTrue(note.startTick() > startBefore, "→ 应右移一个网格");
+            assertTrue(note.startTick() > startBefore, "右移一个网格");
 
             Action left = canvas.getActionMap().get(AppCommandIds.NOTE_MOVE_LEFT);
             SwingUtilities.invokeAndWait(() -> left.actionPerformed(
                     new ActionEvent(canvas, ActionEvent.ACTION_PERFORMED, "note.moveLeft")));
-            assertEquals(startBefore, note.startTick(), "← 应回到原位");
+            assertEquals(startBefore, note.startTick(), "左移回原位");
         } finally {
             cleanup(app, holder[0]);
         }

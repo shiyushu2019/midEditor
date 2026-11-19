@@ -25,6 +25,10 @@ public final class AppCommandIds {
     public static final String EDIT_VELOCITY_UP = "edit.velocityUp";
     public static final String EDIT_VELOCITY_DOWN = "edit.velocityDown";
     public static final String EDIT_SPLIT_AT_PLAYHEAD = "edit.splitAtPlayhead";
+    /** 输入模式：WASD 移动红色光标、Q 试听、空格“按多久输入多长”。 */
+    public static final String EDIT_INPUT_MODE = "edit.inputMode";
+    /** 输入模式的节奏辅助：起点与时值自动吸附到拍。 */
+    public static final String EDIT_INPUT_BEAT_SNAP = "edit.inputBeatSnap";
 
     public static final String NOTE_ADD = "note.add";
     public static final String NOTE_LOCK = "note.lock";
@@ -35,6 +39,12 @@ public final class AppCommandIds {
     public static final String NOTE_MOVE_DOWN = "note.moveDown";
     public static final String NOTE_MOVE_LEFT = "note.moveLeft";
     public static final String NOTE_MOVE_RIGHT = "note.moveRight";
+    /** 方向键：把选中框挑到时间上相邻的前一条 / 后一条，并试听它。 */
+    public static final String NOTE_SELECT_LEFT = "note.selectLeft";
+    public static final String NOTE_SELECT_RIGHT = "note.selectRight";
+    /** 方向键：把选中框挑到音高上相邻的上一条 / 下一条，并试听它。 */
+    public static final String NOTE_SELECT_UP = "note.selectUp";
+    public static final String NOTE_SELECT_DOWN = "note.selectDown";
     public static final String NOTE_LENGTHEN = "note.lengthen";
     public static final String NOTE_SHORTEN = "note.shorten";
     /** Ctrl+→：左端不动，右端往外延长一格（多条选中时按整体只动最外侧）。 */

@@ -47,6 +47,7 @@ final class PianoRollPainter {
         paintLoopRegion(g, view, host, clip);
         paintLocks(g, view, document, clip);
         paintPlayhead(g, view, host, clip);
+        paintInputCursor(g, view, host, document, clip);
 
         Rectangle marquee = canvas.marquee();
         if (marquee != null) {
@@ -95,25 +96,9 @@ final class PianoRollPainter {
         }
         long beatTicks = TimeMath.beatTicks(document, firstTick);
         long barTicks = TimeMath.barTicks(document, firstTick);
-        long step = host.grid().step(ppq);
-        if (step <= 0) {
-            step = Math.max(1, ppq / 4);
-        }
-        if (host.grid().visible()) {
-            long start = (firstTick / step) * step;
-            for (long tick = start; tick <= lastTick; tick += step) {
-                g.setColor(lineColor(tick, barTicks, beatTicks));
-                int x = timeline.xAtTick(tick, ppq);
-                g.drawLine(x, laneTop, x, laneTop + laneHeight - 1);
-            }
-        } else {
-            long start = (firstTick / beatTicks) * beatTicks;
-            for (long tick = start; tick <= lastTick; tick += beatTicks) {
-                g.setColor(lineColor(tick, barTicks, beatTicks));
-                int x = timeline.xAtTick(tick, ppq);
-                g.drawLine(x, laneTop, x, laneTop + laneHeight - 1);
-            }
-        }
+        long step = host.grid().step(ppq); // 0 = 网格分辨率关闭，细分层不画
+        paintTimeGrid(g, view, host, timeline, ppq, laneTop, laneHeight,
+                firstTick, lastTick, step, beatTicks, barTicks);
 
         boolean laneActive = host.activeTrack() == track;
         List<Note> notes = track.notes();
@@ -144,6 +129,61 @@ final class PianoRollPainter {
                 g.fillRect(left, laneTop, ACTIVE_LANE_BAR, laneHeight - 1);
             }
         }
+    }
+
+    /** 细分网格最细能到几像素——再密就不画，否则整片糊成一块，小节和拍完全分不出来。 */
+    private static final int MIN_SUBGRID_PIXELS = 8;
+
+    /**
+     * 时间网格三层：小节 > 拍 > 细分。
+     *
+     * <p>
+     * 三层各用一档颜色、且下层不重复画在上层的位置上，这样一眼能分出「这里换小节了 / 这里是拍」；
+     * 细分线在缩放不足（间距 < {@link #MIN_SUBGRID_PIXELS}px）时直接不画。
+     * </p>
+     */
+    private static void paintTimeGrid(Graphics2D g, PianoRollView view, MidiDocumentView host,
+            TimelineModel timeline, int ppq, int laneTop, int laneHeight,
+            long firstTick, long lastTick, long step, long beatTicks, long barTicks) {
+        int bottom = laneTop + laneHeight - 1;
+        // 1) 细分
+        if (host.grid().visible() && step > 0 && tickWidth(timeline, ppq, step) >= MIN_SUBGRID_PIXELS) {
+            g.setColor(Theme.GRID_LINE);
+            for (long tick = (firstTick / step) * step; tick <= lastTick; tick += step) {
+                if ((beatTicks > 0 && tick % beatTicks == 0) || (barTicks > 0 && tick % barTicks == 0)) {
+                    continue;
+                }
+                int x = timeline.xAtTick(tick, ppq);
+                g.drawLine(x, laneTop, x, bottom);
+            }
+        }
+        // 2) 拍
+        if (beatTicks > 0) {
+            g.setColor(Theme.BEAT_LINE);
+            for (long tick = (firstTick / beatTicks) * beatTicks; tick <= lastTick; tick += beatTicks) {
+                if (barTicks > 0 && tick % barTicks == 0) {
+                    continue;
+                }
+                int x = timeline.xAtTick(tick, ppq);
+                g.drawLine(x, laneTop, x, bottom);
+            }
+        }
+        // 3) 小节（最亮、粗一档，最后画）
+        if (barTicks > 0) {
+            g.setColor(Theme.BAR_LINE);
+            java.awt.Stroke old = g.getStroke();
+            g.setStroke(new java.awt.BasicStroke(2f));
+            for (long tick = (firstTick / barTicks) * barTicks; tick <= lastTick; tick += barTicks) {
+                int x = timeline.xAtTick(tick, ppq);
+                g.drawLine(x, laneTop, x, bottom);
+            }
+            g.setStroke(old);
+        }
+    }
+
+    /** 一段 tick 占多少像素。 */
+    private static int tickWidth(TimelineModel timeline, int ppq, long ticks) {
+        return Math.max(1, timeline.xAtTick(ticks, ppq) - timeline.xAtTick(0, ppq));
     }
 
     private static void paintParallelLine(Graphics2D g, PianoRollView view, MidiDocumentView host,
@@ -267,6 +307,63 @@ final class PianoRollPainter {
         g.drawLine(x, clip.y, x, clip.y + clip.height);
     }
 
+    /**
+     * 输入模式的光标：红色圆点（+ 一根很淡的竖线帮助对齐 tick）。
+     *
+     * <p>
+     * 按着空格时，圆点后面会长出一条半透明「幽灵条」，长度就是已经按住的真实时长，
+     * 松手时它会变成真正的平行线。
+     * </p>
+     */
+    private static void paintInputCursor(Graphics2D g, PianoRollView view, MidiDocumentView host,
+            MidiDocument document, Rectangle clip) {
+        if (!host.inputMode()) {
+            return;
+        }
+        Track track = host.activeTrack();
+        if (track == null) {
+            return;
+        }
+        int laneIndex = document.tracks().indexOf(track);
+        if (laneIndex < 0) {
+            return;
+        }
+        int laneTop = view.laneTop(laneIndex);
+        int laneHeight = view.laneHeight();
+        if (laneTop > clip.y + clip.height || laneTop + laneHeight < clip.y) {
+            return;
+        }
+        int ppq = document.ppq();
+        TimelineModel timeline = view.timeline();
+        long cursorTick = host.inputCursorTick();
+        int x = timeline.xAtTick(cursorTick, ppq);
+
+        int pitch = host.inputCursorPitch();
+        int rowTop = view.rowTop(track, laneIndex, pitch);
+        int rowBottom = view.rowBottom(track, laneIndex, pitch);
+        int rowHeight = Math.max(1, rowBottom - rowTop);
+        int y = (rowTop + rowBottom) / 2;
+
+        // 正在输入：已按住的时长画成幽灵条
+        long pending = host.pendingInputTicks();
+        if (pending > 0) {
+            int x2 = timeline.xAtTick(cursorTick + pending, ppq);
+            g.setColor(Theme.INPUT_GHOST);
+            g.fillRect(x, rowTop, Math.max(2, x2 - x), Math.max(2, rowHeight - 1));
+        }
+
+        if (x < clip.x - 8 || x > clip.x + clip.width + 8) {
+            return;
+        }
+        // 竖线：让圆点的时间位置一眼可读（按 tick 绝对定位，滚动时跟着内容走，不会留残影）
+        g.setColor(Theme.INPUT_GUIDE);
+        g.drawLine(x, laneTop, x, laneTop + laneHeight - 1);
+
+        int radius = Math.max(2, Math.min(5, rowHeight / 2 + 1));
+        g.setColor(Theme.INPUT_CURSOR);
+        g.fillOval(x - radius, y - radius, radius * 2, radius * 2);
+    }
+
     private static void paintLoopRegion(Graphics2D g, PianoRollView view, MidiDocumentView host, Rectangle clip) {
         if (!host.loopEnabled()) {
             return;
@@ -282,16 +379,6 @@ final class PianoRollPainter {
         g.drawLine(x2, clip.y, x2, clip.y + clip.height);
         g.setColor(new Color(0x3D, 0x8B, 0xFD, 0x1A));
         g.fillRect(x1, clip.y, Math.max(1, x2 - x1), clip.height);
-    }
-
-    private static Color lineColor(long tick, long barTicks, long beatTicks) {
-        if (barTicks > 0 && tick % barTicks == 0) {
-            return Theme.BAR_LINE;
-        }
-        if (beatTicks > 0 && tick % beatTicks == 0) {
-            return Theme.BEAT_LINE;
-        }
-        return Theme.GRID_LINE;
     }
 
     static boolean isBlackKey(int pitch) {

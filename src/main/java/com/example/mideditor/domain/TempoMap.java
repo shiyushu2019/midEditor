@@ -11,7 +11,7 @@ public final class TempoMap {
     public record Segment(long tick, long microsPerQuarter) {
     }
 
-    public static final long DEFAULT_MICROS_PER_QUARTER = 500_000L; // 120 BPM
+    public static final long DEFAULT_MICROS_PER_QUARTER = 1_000_000L; // 60 BPM
 
     private final int ppq;
     private final List<Segment> segments = new ArrayList<>();

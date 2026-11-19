@@ -36,10 +36,17 @@ final class TrackToolsPanels {
     }
 
     private static JButton button(String text, Runnable action) {
+        return button(text, null, action);
+    }
+
+    private static JButton button(String text, String tooltip, Runnable action) {
         JButton button = new JButton(text);
         button.setFont(Theme.SMALL_FONT);
         button.setFocusable(false);
         button.setMargin(new java.awt.Insets(1, 6, 1, 6));
+        if (tooltip != null) {
+            button.setToolTipText(tooltip);
+        }
         button.addActionListener(e -> action.run());
         return button;
     }
@@ -71,11 +78,11 @@ final class TrackToolsPanels {
                 }
             });
             add(new JScrollPane(list), BorderLayout.CENTER);
-            JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
-            buttons.add(button("添加", () -> withView(MidiDocumentView::addTrack)));
-            buttons.add(button("删除", () -> withView(v -> v.removeTrack(v.activeTrack()))));
-            buttons.add(button("上移", () -> withView(v -> v.moveTrack(v.activeTrack(), -1))));
-            buttons.add(button("下移", () -> withView(v -> v.moveTrack(v.activeTrack(), 1))));
+            JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 3, 2));
+            buttons.add(button("＋", "添加音轨", () -> withView(MidiDocumentView::addTrack)));
+            buttons.add(button("－", "删除音轨", () -> withView(v -> v.removeTrack(v.activeTrack()))));
+            buttons.add(button("▲", "上移音轨", () -> withView(v -> v.moveTrack(v.activeTrack(), -1))));
+            buttons.add(button("▼", "下移音轨", () -> withView(v -> v.moveTrack(v.activeTrack(), 1))));
             add(buttons, BorderLayout.SOUTH);
         }
 

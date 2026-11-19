@@ -6,6 +6,8 @@ import java.util.List;
 import javax.sound.midi.ShortMessage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
@@ -70,7 +72,7 @@ class MidiFileCodecTest {
     }
 
     @Test
-    void roundTripPreservesViewRangeAndTuningEvents(@TempDir Path dir) throws Exception {
+    void roundTripKeepsMusicButNotTheViewRange(@TempDir Path dir) throws Exception {
         MidiDocument document = new MidiDocument(480);
         Track lead = new Track("主旋律", 0, 40, java.awt.Color.BLUE);
         lead.setYRange(new PitchRange(40, 70));
@@ -89,13 +91,29 @@ class MidiFileCodecTest {
 
         Track loadedLead = loaded.tracks().get(0);
         assertEquals("主旋律", loadedLead.name(), "音域标记不得污染音轨名");
-        assertEquals(new PitchRange(40, 70), loadedLead.yRange(), "重新打开后音域窗口应保持不变");
+        // 视图状态（音域缩放 / 上下位置）不入文件：每次打开都按内容重新适配
+        assertNotEquals(new PitchRange(40, 70), loadedLead.yRange(), "不再沿用保存时的音域窗口");
+        assertEquals(Track.VISIBLE_ROWS, loadedLead.pitchRows(), "行数（缩放级别）回默认");
+        assertTrue(loadedLead.yRange().contains(60) && loadedLead.yRange().contains(67),
+                "适配后的窗口要装下所有音");
         assertEquals(2, loadedLead.notes().size());
         assertEquals(60, loadedLead.notes().get(0).pitch());
         assertTrue(loadedLead.rawEvents().stream()
                 .anyMatch(e -> e.command() == ShortMessage.PITCH_BEND), "弯音事件必须保留");
         assertTrue(loadedLead.rawEvents().stream()
                 .anyMatch(e -> e.command() == ShortMessage.CONTROL_CHANGE && e.data1() == 101), "RPN 事件必须保留");
+
+        // 文件里也不该再有视图状态的标记
+        javax.sound.midi.Sequence sequence = javax.sound.midi.MidiSystem.getSequence(file.toFile());
+        for (javax.sound.midi.Track midiTrack : sequence.getTracks()) {
+            for (int i = 0; i < midiTrack.size(); i++) {
+                if (midiTrack.get(i).getMessage() instanceof javax.sound.midi.MetaMessage meta
+                        && meta.getType() == 0x01) {
+                    String text = new String(meta.getData(), java.nio.charset.StandardCharsets.UTF_8);
+                    assertFalse(text.startsWith("mideditor:yRange="), ".mid 里不该再写音域标记：" + text);
+                }
+            }
+        }
 
         PlaybackPlan plan = PlaybackPlan.build(loaded, false);
         assertTrue(plan.events().stream()

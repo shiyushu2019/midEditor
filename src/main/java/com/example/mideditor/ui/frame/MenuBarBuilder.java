@@ -106,6 +106,9 @@ public final class MenuBarBuilder {
         item(menu, AppCommandIds.EDIT_VELOCITY_UP, "力度 +10");
         item(menu, AppCommandIds.EDIT_VELOCITY_DOWN, "力度 -10");
         item(menu, AppCommandIds.EDIT_SPLIT_AT_PLAYHEAD, "在播放头拆分");
+        menu.addSeparator();
+        checkItem(menu, AppCommandIds.EDIT_INPUT_MODE, "输入模式");
+        checkItem(menu, AppCommandIds.EDIT_INPUT_BEAT_SNAP, "节奏辅助");
 
         JMenu lines = new JMenu("平行线");
         lines.setFont(Theme.BASE_FONT);
@@ -119,6 +122,12 @@ public final class MenuBarBuilder {
         item(lines, AppCommandIds.NOTE_MOVE_DOWN, "下移半音");
         item(lines, AppCommandIds.NOTE_MOVE_LEFT, "左移网格");
         item(lines, AppCommandIds.NOTE_MOVE_RIGHT, "右移网格");
+        lines.addSeparator();
+        item(lines, AppCommandIds.NOTE_SELECT_LEFT, "选中左一条");
+        item(lines, AppCommandIds.NOTE_SELECT_RIGHT, "选中右一条");
+        item(lines, AppCommandIds.NOTE_SELECT_UP, "选中上一条");
+        item(lines, AppCommandIds.NOTE_SELECT_DOWN, "选中下一条");
+        lines.addSeparator();
         item(lines, AppCommandIds.NOTE_EXTEND_LEFT, "左端延长一格（Ctrl+←）");
         item(lines, AppCommandIds.NOTE_EXTEND_RIGHT, "右端延长一格（Ctrl+→）");
         lines.addSeparator();

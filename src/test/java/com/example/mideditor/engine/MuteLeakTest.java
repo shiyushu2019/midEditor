@@ -61,6 +61,7 @@ class MuteLeakTest {
 
     private static MidiDocument twoTracks() {
         MidiDocument document = new MidiDocument(480);
+        document.tempoMap().setBpm(0, 120); // 用例按“240 tick ≈ 250ms”排时间，别跟着默认 BPM 变
         Track audible = new Track("主旋律", 0, 0, Color.BLUE);
         for (int i = 0; i < 16; i++) {
             audible.addNote(new Note(60, i * 240L, 240, 100));

@@ -32,6 +32,10 @@ public final class SynthService implements AutoCloseable {
     /** 正在发声的音符（channel<<8|pitch），All Notes Off 后清空。 */
     private final java.util.Set<Integer> activeNotes = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private volatile long lastTimestamp = -1;
+    /** 正在试听的音符（换选中对象时要先收掉）与它的自动 note-off 定时器。 */
+    private javax.swing.Timer auditionTimer;
+    private int auditionChannel = -1;
+    private int auditionPitch = -1;
 
     public synchronized void open() {
         if (synth != null) {
@@ -229,6 +233,7 @@ public final class SynthService implements AutoCloseable {
     }
 
     public void allNotesOff() {
+        cancelAudition(); // 试听音也一起收掉，免得开始播放时它还挂着
         try {
             for (int ch = 0; ch < 16; ch++) {
                 // 先松延音踏板：踏板踩下时 All Notes Off 会被“留住”变成余音
@@ -249,9 +254,69 @@ public final class SynthService implements AutoCloseable {
         return activeNotes.size();
     }
 
-    /** 试听单个音符（单击平行线时使用）：立即发声，到时自动 note-off。 */
-    public void audition(int channel, int program, int pitch, int velocity,
+    /** 试听单个音符（单击平行线 / 方向键走位时使用）：立即发声，到时自动 note-off。 */
+    public synchronized void audition(int channel, int program, int pitch, int velocity,
             int volume, int pan, long millis) {
+        if (!available || receiver == null) {
+            return;
+        }
+        int ch = Math.max(0, Math.min(15, channel));
+        int note = Math.max(0, Math.min(127, pitch));
+        // 连着换选中对象时，上一条试听要立刻收掉，否则几个音会叠在一起
+        cancelAudition();
+        try {
+            resetChannel(ch);
+            send(new ShortMessage(ShortMessage.PROGRAM_CHANGE, ch, Math.max(0, Math.min(127, program)), 0));
+            send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 7, Math.max(0, Math.min(127, volume))));
+            send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 10, Math.max(0, Math.min(127, pan))));
+            send(new ShortMessage(ShortMessage.NOTE_ON, ch, note, Math.max(1, Math.min(127, velocity))));
+            auditionChannel = ch;
+            auditionPitch = note;
+            javax.swing.Timer timer = new javax.swing.Timer((int) Math.max(60, millis),
+                    e -> finishAudition(ch, note));
+            timer.setRepeats(false);
+            timer.start();
+            auditionTimer = timer;
+        } catch (javax.sound.midi.InvalidMidiDataException | RuntimeException ignored) {
+            // 试听失败不影响编辑
+        }
+    }
+
+    /** 到点了：收掉这一声（若中间已换了选中对象，cancelAudition 早就收过、这里什么都不做）。 */
+    private synchronized void finishAudition(int channel, int pitch) {
+        if (auditionChannel != channel || auditionPitch != pitch) {
+            return;
+        }
+        cancelAudition();
+    }
+
+    /** 收掉正在试听的那个音（换选中对象 / 关闭文档时用）。 */
+    public synchronized void cancelAudition() {
+        if (auditionTimer != null) {
+            auditionTimer.stop();
+            auditionTimer = null;
+        }
+        if (auditionChannel >= 0 && receiver != null) {
+            try {
+                send(new ShortMessage(ShortMessage.NOTE_OFF, auditionChannel, auditionPitch, 0));
+            } catch (javax.sound.midi.InvalidMidiDataException | RuntimeException ignored) {
+                // 收尾失败忽略
+            }
+        }
+        auditionChannel = -1;
+        auditionPitch = -1;
+    }
+
+    public boolean available() {
+        return available;
+    }
+
+    /**
+     * 「按住出声」：按下时立刻发 note-on，松手时由 {@link #previewOff} 收掉。
+     * 输入模式用它把按键按住的时间「听得见」。
+     */
+    public synchronized void previewOn(int channel, int program, int pitch, int velocity,
+            int volume, int pan) {
         if (!available || receiver == null) {
             return;
         }
@@ -263,22 +328,22 @@ public final class SynthService implements AutoCloseable {
             send(new ShortMessage(ShortMessage.CONTROL_CHANGE, ch, 10, Math.max(0, Math.min(127, pan))));
             send(new ShortMessage(ShortMessage.NOTE_ON, ch,
                     Math.max(0, Math.min(127, pitch)), Math.max(1, Math.min(127, velocity))));
-            javax.swing.Timer timer = new javax.swing.Timer((int) Math.max(60, millis), e -> {
-                try {
-                    send(new ShortMessage(ShortMessage.NOTE_OFF, ch, Math.max(0, Math.min(127, pitch)), 0));
-                } catch (javax.sound.midi.InvalidMidiDataException | RuntimeException ignored) {
-                    // 自动 note-off 失败忽略
-                }
-            });
-            timer.setRepeats(false);
-            timer.start();
         } catch (javax.sound.midi.InvalidMidiDataException | RuntimeException ignored) {
             // 试听失败不影响编辑
         }
     }
 
-    public boolean available() {
-        return available;
+    /** 收掉 {@link #previewOn} 发出的音。 */
+    public synchronized void previewOff(int channel, int pitch) {
+        if (receiver == null) {
+            return;
+        }
+        int ch = Math.max(0, Math.min(15, channel));
+        try {
+            send(new ShortMessage(ShortMessage.NOTE_OFF, ch, Math.max(0, Math.min(127, pitch)), 0));
+        } catch (javax.sound.midi.InvalidMidiDataException | RuntimeException ignored) {
+            // 收尾失败忽略
+        }
     }
 
     /**

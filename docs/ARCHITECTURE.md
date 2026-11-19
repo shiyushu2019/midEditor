@@ -204,6 +204,9 @@ public interface DocumentEdit { String label(); void undo(); void redo(); boolea
 - 播放头动画只 `repaint` 播放头新旧位置的窄条（约 8 px 宽，见 `PianoRollView.repaintPlayhead`），不触发全量重绘；泳道内容变化用脏矩形合并。
 - **局部重绘的硬约束**：`paint()` 里一切「位置固定」的装饰（活动音轨左侧高亮条、锁定圆点、循环区）都必须按 **tick / 视口边界**（`view.visibleRect().x`）定位，**绝不能**用 `clip.x` —— 播放头每帧只刷一条窄带，用 `clip.x` 就会在窄带起点一路留下竖线（曾经踩过：活动音轨高亮条变成"播放头竖线状尾迹"）。回归测试：`ActiveLanePaintTest`。
 - **垂直方向禁止固定贴边装饰**：Swing 垂直滚动是「位块拷贝 + 只补新露出的一条带」，任何贴着视口上下边界画的装饰（播放头顶部三角曾经如此）会被连同内容一起搬走，屏上留下一串旧箭头（音轨多时向上翻尤其明显）。因此**画布里的播放头只有竖线**，顶端三角由 `TimeRuler`（列头，不参与垂直滚动、且按 tick 绝对定位）绘制。回归测试：`PlayheadArrowPaintTest`。
+- **播放头动画只局部重绘 → 状态翻转的装饰必须整条重刷**：发声高亮是按 `isNoteSounding(note)` 整条换色的；窄带重绘只盖 ±8px，所以播放头跨过某条线的头 / 尾时只有那一小段换了颜色，剩下的仍是旧色（现象：“每条线末尾总有固定一小段不亮” / “走过去了还亮着”）。`PianoRollView.repaintHighlightChangedNotes(from,to)` 把 `startTick` 或 `endTick` 落在 `(from,to]` 里的平行线整条 `repaint`。回归测试：`PlayheadHighlightTest`。
+- **时间网格必须分层**：小节（最亮、2px）> 拍（中等）> 细分（极淡），下层不重复画在上层位置；**细分线间距 < 8px 时整层不画**（`MIN_SUBGRID_PIXELS`）——否则缩小后整片糊成一块，根本分不出小节和拍（用户反馈原话：网格杂乱、没法辅助找节奏）。
+- **网格分辨率必须对应真实时值**：`GridSettings.Resolution.ticksPerGrid` = 1/4→ppq、1/8→ppq/2、1/16→ppq/4、1/32→ppq/8、**1/8 三连音→ppq/3**、**1/16 三连音→ppq/6**（三连音旧实现写成 ppq*2/3 与 ppq/3，整整差一倍，下拉框选了也对不上画面）；`OFF` 时细分层完全不画（旧实现会回退成 1/16 网格继续画）。回归测试：`GridResolutionTest`。
 - 双缓冲由 Swing 默认提供；动画由独立 `javax.swing.Timer`（60 Hz）+ EDT 合并重绘。
 
 **长文件的复杂度红线（编辑路径必须线性）**
@@ -213,6 +216,23 @@ public interface DocumentEdit { String label(); void undo(); void redo(); boolea
 - 回归测试 `LongFileEditPerformanceTest`（2 万音符，时间上限只用来兜住算法退化，不追求精确数值）。
 
 **命中与交互**：`HitTester` 统一提供 `hitAt(x,y)`（命中平行线主体 / 右端手柄 6 px / 空白）；`DragSession` 三种模式：MOVE（pitch+time）、RESIZE_END（duration）、MARQUEE。
+
+**输入模式（v1.1）**
+- 状态挂在 `MidiDocumentView`：`inputMode` + 光标 `(inputCursorTick, inputCursorPitch)` + 空格按住的起始纳秒/**按下那一刻的位置**/正在响的试听音；无独立组件，只是画布上的一个装饰 + 一套全局按键路由。
+- 按键走 `app/InputModeDispatcher`（`KeyEventDispatcher`）而不是画布键绑定：焦点可能在工具栏/状态栏；且**空格在输入模式下必须优先于「播放/暂停」**，消费掉事件就不会落到命令系统（`Ctrl+Space` 等带修饰键的仍放行）。
+- **按住就要听得见**：`SynthService.previewOn/previewOff` 成对发 NOTE_ON / NOTE_OFF，音符长度与听到的长度天然一致；窗口失焦（Alt+Tab、弹窗）时由 `AppContext` 里的 `focusedWindow` 监听补一次 `endInputNote()`，否则松手事件永远收不到 → 卡音 + 幽灵条一直长。退出输入模式走 `abortInputNote()`（作废音符但一定收声）。
+- 时长换算：松手时 `heldNanos → micros → tick`，用 `TempoMap.microsAtTick` / `tickAtMicros` 在光标 tick 处求逆（跨变速按段累加），**不吸附网格**——这就是「按住多久就是多久」。
+- 绘制：`PianoRollPainter.paintInputCursor`（红色圆点 + 极淡的 tick 竖线）；按住空格时再画一条半透明「幽灵条」，长度取 `pendingInputTicks()`，由 60 Hz 的 `uiTimer` 在按住期间逐帧刷新。圆点与竖线都按 tick 绝对定位，滚动时随内容平移，不会被位块拷贝成残影。
+- **节奏辅助（可选开关）**：`inputBeatSnap` 打开后，起点和时值都吸附到当前网格单位（`assistUnitTicks()` = `grid.step(ppq)`，网格关闭时退回一拍）。
+- **关键：按“敲击间隔”落点，而不是每条音各自取整**。只把每条音的起点四舍五入到最近网格线，会让“起点=上一次起点+上一次吸附后的长度”，只要敲的间隔和按住时长不一致，后面每个音就会系统性地偏移。现在的做法：第一次按下时记锚点 `(assistAnchorNanos, assistAnchorTick)`，之后每次按下用 `microsToTicks(距锚点的真实时间)` 算出应该落在哪个 tick，再贴网格——所以敲四分就落四分、敲八分就落八分，不会被上一条音的取整误差带偏。
+  - 锚点失效条件：手动 A/D 移光标、切换轨道、进出输入模式、开关辅助、撤销/重做、以及**停顿超过 1.5s**（`PAUSE_REANCHOR_NANOS`）——重新锚定到光标处，避免“走开一会儿回来，音被摆到三秒之后”。
+  - 时钟可注入：`setNanoClockForTesting(LongSupplier)`（包内可见），测试可以精确控制“按了多久 / 隔了多久”。
+  - 入口：工具栏第二个开关 + 编辑菜单勾选项；`InputModeTest` 里用假时钟验证“断奏每 480ms 敲一下 → 落点 0/480/960”。
+- **光标可以翻动频谱**：`moveCursorTo` 不再把音高夹在可见音域内，而是 `scrollPitchWindowToCursor(track)` —— 光标越过窗口上/下边界时 `Track.shiftPitchRange()` 把窗口推过去（行数不变），再刷新键盘标尺与音轨头；切轨 / 重新进入输入模式时同样把新窗口翻到光标处。
+- 入口：工具栏 `JToggleButton`（选中态跟随命令）+ 编辑菜单勾选项 + `Ctrl+I`。
+- **撤销 / 重做要带上光标**：`endInputNote` 往 `inputSteps` 里压一条 `(track, noteId, beforeTick/Pitch, afterTick/Pitch)`；`MidiDocumentView.undo()` / `redo()`（命令层只调这两个）事后检查栈顶那条音符是否还在 —— 被撤销就退到 `before` 并压入 `undoneInputSteps`，被重做就退栈并跳到 `after`。别的编辑不会动光标。
+- 回归测试 `InputModeTest`（17 项）+ `InputPreviewSoundTest`（1 项，假 Receiver 验证 NOTE_ON/NOTE_OFF 与 `activeNoteCount`）。
+- **Q 是“按住一个音到底”**：`beginInputAudition()/endInputAudition()` 成对发 note-on/off，自动重复的 KEY_PRESSED 被 `inputAuditionHeld` 拦住；早期用 `audition(…, 220ms)` + 自动重复，听感是“一个音被反复敲”。
 
 ## 5. 播放调度方案
 
@@ -309,7 +329,7 @@ public interface DocumentEdit { String label(); void undo(); void redo(); boolea
 | 单击平行线试听 | `SynthService.audition(...)`：program/CC7/CC10 + note-on，定时 note-off；`PianoRollCanvas` 在"按下未拖动"释放时触发；任何文档播放期间不叠加试听 |
 | 新建平行线默认时长 | `GridSettings.NoteLength`（跟随网格 / 1/4 / 1/8 / 1/16 / 1/32 / 1 小节 / 自定义 tick）；右键空白菜单与「网格设置」面板均可修改，1 小节按文档拍号计算 |
 | Y 轴钢琴键盘标尺 | `PianoKeysColumn` 位于行头最左，逐泳道按各自音域绘制白/黑键与 C 音标注；与 GM 音色无关；视图→键盘标尺（Ctrl+K）或网格设置面板可显隐 |
-| 保存/重开后音高偏移 | 根因：①重新打开时每轨音域窗口被 `autoRangeFromNotes` 重定位；②弯音/RPN 调音等通道事件保存时被丢弃；③合成器通道残留上一个文档的调音状态。修复：写入 `mideditor:yRange=` 标记并恢复；`RawChannelEvent` 保留弯音/RPN/踏板等并参与回放；每次播放/试听前 `resetAllChannels()`（弯音回中、RPN 归零），seek 时重放目标位置前的状态事件 |
+| 保存/重开后音高偏移 | 根因：①重新打开时每轨音域窗口被 `autoRangeFromNotes` 重定位；②弯音/RPN 调音等通道事件保存时被丢弃；③合成器通道残留上一个文档的调音状态。修复：`RawChannelEvent` 保留弯音/RPN/踏板等并参与回放；每次播放/试听前 `resetAllChannels()`（弯音回中、RPN 归零），seek 时重放目标位置前的状态事件。~~写入 `mideditor:yRange=` 标记并恢复~~（视图状态现已不再入文件，见 v1.13） |
 | 平行线长度≠实际时长 / 相邻线一起响 | 根因：`SoftSynthesizer#getMicrosecondPosition` 属未导出包，反射被拒 → `micros()` 返回 -1，引擎退化为把 260ms lookahead 内的事件**立即发送**。修复：jar 清单加 `Add-Exports: java.desktop/com.sun.media.sound`（surefire/launch.json/app:run 同步加 `--add-exports`）恢复采样级时间戳调度；无时钟时降为 8ms 前瞻 + 3ms 轮询；note-off 额外提前 400µs，保证同 tick 的下一条 note-on 不被误杀 |
 | 保存到已存在文件无提示 | `DocumentFileService.chooseSave` 增加覆盖判定：目标存在时弹出「确认覆盖」（是/否），选择“否”则取消；目标为目录时给出提示。`ensureOverwriteAllowed(Path, Supplier<Boolean>)` 抽成可测试函数 |
 | 停止后重新播放，播放头瞬移数小节 | 根因：Gervill 的 `getMicrosecondPosition()` 是「已渲染帧数」，空闲后会一次性追帧（实测 16384 帧 ≈ 371ms），播放头以它为锚点就会瞬间多出数百 ms。修复：播放头/自动暂停等一律用单调的 `System.nanoTime()` 计算 elapsed；事件时间戳改为每条发送时「当前合成器时钟 + 剩余延迟」，不再使用固定合成器锚点 |
@@ -426,3 +446,48 @@ public interface DocumentEdit { String label(); void undo(); void redo(); boolea
 **「按过 Alt 之后滚轮完全没反应」根因**：单独按一下（或按住又松开）Alt 时，Windows 会让窗口进入系统「菜单模式」（`WM_SYSKEYUP`），此期间 OS 直接**丢弃滚轮消息**（键盘与点击仍正常），必须再按一个键或点击一次才会恢复 —— 这就是“滚轮时灵时不灵”的真因。修复：`app/AltReleaseWheelFix` 监听裸 Alt 抬起，用缓存的 `Robot` 补发一个 ESC（本应用不占用 ESC）让窗口立即退出菜单模式；仅在主窗口为活动窗口、且无弹出菜单选择时补发。实测：Alt 抬起后裸滚轮 45→44（修复前为无事件）。
 
 新增 `PitchAxisTest` 用例（统一修饰键语义、Ctrl 缩放锚点音高不变、裸滚轮滑动），测试总计 34 项。
+
+### v1.10 缩放也要吸附，且连续的一组缩放后不能拉出缝
+
+两个并列的手感缺陷，根因都在 `MidiDocumentView` 的两条缩放入口上（`applySelectionResize` 鼠标拖右端 / `resizeSelection` 长度四键）：
+
+1. **缩放完全不吸附**。`PianoRollCanvas.mouseDragged` 的 `RESIZE` 分支直接把像素差换算成 `rawTick` 交给 `applySelectionResize`，后者 `setDurationTicks(origin[2] + deltaTicks)` 原样落值；移动（`applySelectionMove`）有 `snapToNeighbour` + 网格吸附，缩放却没有，于是右端可以停在任意 tick 上。
+   修法：`resizedDuration(note, 之前区间, delta)` 把**被拉的那条边**（`之前末尾 + delta`）过一遍 `snapResizeEdge`（= `grid.snap(...)`，吸附开关或网格分辨率关掉时原样返回），长度按 `吸附后末尾 - 当前起点` 反算；起点不动。休止符那条 ripple 分支同理：以被拖休止符的末尾为锚点把位移量吸成整格（`snapRippleDelta`）。
+2. **多选一起缩放会凭空长出休止符**。每条各加同一个 `delta`，缩短时每条的右侧都多出 `delta` 的空隙，`reconcileRests` 忠实地把这些碎缝实体化成红色休止符。锁定时看起来正常，是因为 `reflowLocks` 会把锁住的同伴「移回来」。
+   修法：缩放前先拍一份 `{起, 止}`（`timeSnapshot` / `primaryTimesBefore`），缩放后调 `glueSelectionChain(tracks, before)`：把选中项按**缩放前**的顺序排好，若相邻两条原本 `前.止 == 后.起`，就把后一条的 `startTick` 拉回 `前一条.endTick`（**只移位置、不改长度**，与 `reflowLocks` 同一套思想），然后逐条把末尾再吸一次网格（起点跟着接缝走了，末尾必须重吸，否则接缝对齐后末尾又会落回网格外）。判据用「缩放**之前**是否相接」，所以本来分开的音符不会被硬吸到一起。
+
+验证：`ResizeSnapTest` 4 项（单条/多条拖右端后末尾都在网格线上、键盘改长度同样吸附、关掉吸附才保留原始位移）＋ `ContiguousResizeTest` 4 项（三条一起缩短/加长后仍首尾相接且不冒休止符、键盘缩短同样成立、不相接的两条不被吸到一起），测试总计 120 项。
+
+### v1.11 迷你左栏、F5 播放键、Ctrl+I 三态循环
+
+- **左侧工具窗口缩成迷你**：`DockManager` 不再写死 250，改在 `doLayout()` 里 `applyMiniLeftWidth()`——宽度取窗口的 1/4，再夹到 `[MINI_LEFT_MIN=120, MINI_LEFT_MAX=160]`（纯 1/4 在 1200px 窗口上是 300、在 400px 上是 100，两头都不好用）。配套把 `DockPanel` 的「浮/×」按钮 margin 归零（22px 才装得下单个汉字），`TracksPanel` 的四个按钮由「添加 删除 上移 下移」改成 `＋ － ▲ ▼` + tooltip，否则 160px 一行放不下会折行。
+- **播放键**：`PLAY_PLAY_PAUSE` 主键 空格 → **F5**、`PLAY_STOP` Ctrl+空格 → **Ctrl+F5**、`PLAY_REWIND` Ctrl+Home → **F6**；旧键用 `CommandRegistry.bindAlias` 保留为备用（`CommandRoutingTest` 里断言过空格仍然映射到播放，别名不破坏它）。
+- **Ctrl+I 三态循环**（`EditCommands` 的 `EDIT_INPUT_MODE` 处理器）：`关 → 输入模式＋节奏辅助 → 输入模式（无辅助） → 关`。第一下就落到「带辅助」那档，第二下只关辅助（光标还在），第三下退出。`setInputMode` 本身不动 `inputBeatSnap`，所以「先开模式再开辅助」不会互相覆盖。
+- 新增 `DockMiniWidthTest` 3 项（1200→160、400→120、1600→160）与 `ShortcutReworkTest` 2 项（F5/Ctrl+F5/F6 绑定与空格别名、三次按键的状态序列），测试总计 125 项。
+
+### v1.12 WASD 移动、方向键换选中框
+
+原来的裸方向键是「移动选中的平行线」，和输入模式的 WASD 各管一摊；用户要把两者按「模式」和「功能」拆开：
+
+- **W/A/S/D**：非输入模式 = 移动选中的平行线（W/S ±1 半音、A/D ±1 网格），输入模式 = 移动红色光标。实现放在 `ArrowKeyDispatcher.wasdCommandIdFor()`：先看 `view.inputMode()`，是的话直接返回 null（交给 `InputModeDispatcher`，它在 KEY_PRESSED 阶段就 consume 掉了）；否则映射到 `NOTE_MOVE_*` 命令。**不能**把 W/A/S/D 直接写进全局 InputMap——`WHEN_IN_FOCUSED_WINDOW` 会在文本控件的 `typed` 之前吃掉字母键，BPM 框、音轨名就再也打不进 w/a/s/d 了。
+- **←/→/↑/↓**：任何时候都只移动**选中框**（新增 `NOTE_SELECT_LEFT/RIGHT/UP/DOWN` → `MidiDocumentView.stepSelection(timeStep, pitchStep)`）。规则：活动音轨内、只看发声的平行线（休止符走过去没声音反而奇怪）；←/→ 按起点前后取相邻那条，↑/↓ 取音高差最小、同差再比时间距离的那条；没有选中时按播放头就近取一条；到头就停住不越界。**不改任何 tick**，只 `selection().setSingle(target)` + `scrollToTick` + 试听。
+- **试听要“像它自己”**：`auditionNote` 的时长从「压到 120–1500ms」改成 `tempoMap` 算出的**真实时值**（最短 60ms，不再封顶 1500ms），`lastAudition={音高, 毫秒}` 先记下再尝试发声（没音频设备也能验证走位）。`SynthService.audition` 变成 `synchronized` 并在每次开新声前 `cancelAudition()`（收掉上一声的 NOTE_OFF、停掉旧定时器），否则连着按方向键会把几个音叠在一起；定时器到点走 `finishAudition()`，若中途已经换过对象就什么也不做。`allNotesOff()` 也顺带 `cancelAudition()`。
+- 兼容：`Alt+↑↓←→` 仍是 `NOTE_MOVE_*` 的别名（`bindAlias`），`Ctrl/Shift+←→` 的伸缩语义完全没动；画布 `installArrowKeys()` 的本地绑定同步改成 `NOTE_SELECT_*`，否则滚动面板的同键绑定会抢走方向键。
+- 测试：`SelectionStepTest` 5 项（WASD 移音符 / 输入模式 WASD 归光标 / ←→ 走位且不动音符 / ↑↓ 按音高走位 / 每步按自己的时值试听）＋ `AuditionSoundTest` 2 项（NOTE_ON 到点收 NOTE_OFF、再次试听先掐掉上一声），测试总计 132 项。
+
+### v1.13 视图状态不再写进 .mid（“软件不该记忆缩放”）
+
+现象：用户关掉再开、重新打开自己的工程，发现频谱缩放程度与 BPM 还是上次的样子，觉得软件“不纯净”。
+
+事实核对：`MidiEditorApp` 启动时**不新建文档、不打开文件、不读写任何配置**，程序里也没有 `java.util.prefs` / properties / 任何属性文件；`DocumentManager.newDocument()` 每次都是全新的 `MidiDocument(480)` + 一个默认 Track。所以「记忆」只可能来自 **.mid 文件本身**：
+
+1. **BPM / 拍号**是标准 MIDI 的 tempo(0x51) / 拍号(0x58) meta —— 属于乐曲数据，本来就该跟着文件走（也是别的 DAW 打开时的行为）。
+2. **频谱缩放 / 上下位置**是 v1.1 为修「重开音高偏移」特意写进去的自定义标记 `mideditor:yRange=low,high` —— 这是**视图状态**，确实不该进文件。
+
+改法（`MidiFileCodec`）：
+
+- 写盘不再输出 `mideditor:yRange=`；
+- 读盘删掉 `findStoredRange()`，一律 `track.autoRangeFromNotes()`（按内容适配音域）；
+- 常量改名 `LEGACY_RANGE_MARKER`，只用于 `collectForeignMeta()` 把旧文件里的这条标记**丢掉**，否则它会被当“外来 meta”永远搬运下去。
+
+回归：`FreshInstanceStateTest`（实例 A 改 150 BPM / 60 行 → 关掉 → 实例 B 新建文档必须是 60 BPM + 默认行数）、`MidiFileCodecTest.roundTripKeepsMusicButNotTheViewRange`（乐曲事件全保真、音域按内容重算、文件里不许再有该标记），测试总计 133 项。

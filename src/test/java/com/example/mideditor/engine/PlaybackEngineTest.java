@@ -73,6 +73,7 @@ class PlaybackEngineTest {
         try {
             assumeTrue(synth.available(), "当前环境无可用音频设备");
             MidiDocument document = new MidiDocument(480);
+            document.tempoMap().setBpm(0, 120); // 这条用例靠“1 拍 ≈ 0.5s”的时间窗，别跟着默认 BPM 变
             Track track = new Track("长音", 0, 0, Color.BLUE);
             // 第 1 个音立刻发声并持续 4 小节；第 2 个音在 1 拍后（120BPM ≈ 0.5s）开始
             track.addNote(new Note(60, 0, 4 * 1920L, 100));

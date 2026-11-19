@@ -21,6 +21,10 @@ import com.example.mideditor.ui.theme.Theme;
  */
 public final class DockManager extends JPanel {
 
+    /** 左侧工具窗口做成迷你宽度：窗口宽度的四分之一，夹在这个区间内保证还看得清。 */
+    private static final int MINI_LEFT_MIN = 120;
+    private static final int MINI_LEFT_MAX = 160;
+
     public enum Region {
         LEFT, RIGHT, BOTTOM
     }
@@ -35,7 +39,7 @@ public final class DockManager extends JPanel {
 
     public DockManager() {
         super(new BorderLayout());
-        left.setPreferredSize(new Dimension(250, 100));
+        left.setPreferredSize(new Dimension(MINI_LEFT_MAX, 100));
         right.setPreferredSize(new Dimension(260, 100));
         bottom.setPreferredSize(new Dimension(100, 180));
         add(left, BorderLayout.WEST);
@@ -43,6 +47,25 @@ public final class DockManager extends JPanel {
         add(bottom, BorderLayout.SOUTH);
         add(center, BorderLayout.CENTER);
         updateRegionVisibility();
+    }
+
+    @Override
+    public void doLayout() {
+        applyMiniLeftWidth();
+        super.doLayout();
+    }
+
+    /** 左侧停靠区占窗口宽度的四分之一（太小或太大时夹到可读区间）。 */
+    private void applyMiniLeftWidth() {
+        int available = getWidth();
+        if (available <= 0) {
+            return;
+        }
+        int target = Math.max(MINI_LEFT_MIN, Math.min(MINI_LEFT_MAX, available / 4));
+        Dimension current = left.getPreferredSize();
+        if (current.width != target) {
+            left.setPreferredSize(new Dimension(target, current.height));
+        }
     }
 
     private static JPanel regionPanel() {

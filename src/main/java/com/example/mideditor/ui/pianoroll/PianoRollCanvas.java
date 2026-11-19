@@ -51,17 +51,17 @@ public final class PianoRollCanvas extends JComponent {
         installArrowKeys();
     }
 
-    /** 方向键直接改音高 / 位置（画布有焦点时优先于滚动面板的同键绑定）。 */
+    /** 方向键移动选中框（画布有焦点时优先于滚动面板的同键绑定）。 */
     private void installArrowKeys() {
         CommandRegistry registry = view.host().app().registry();
         registry.bindLocal(this, javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_UP, 0),
-                AppCommandIds.NOTE_MOVE_UP);
+                AppCommandIds.NOTE_SELECT_UP);
         registry.bindLocal(this, javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_DOWN, 0),
-                AppCommandIds.NOTE_MOVE_DOWN);
+                AppCommandIds.NOTE_SELECT_DOWN);
         registry.bindLocal(this, javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_LEFT, 0),
-                AppCommandIds.NOTE_MOVE_LEFT);
+                AppCommandIds.NOTE_SELECT_LEFT);
         registry.bindLocal(this, javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_RIGHT, 0),
-                AppCommandIds.NOTE_MOVE_RIGHT);
+                AppCommandIds.NOTE_SELECT_RIGHT);
         registry.bindLocal(this,
                 javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_RIGHT,
                         java.awt.event.InputEvent.SHIFT_DOWN_MASK),

@@ -31,9 +31,9 @@ public final class Theme {
     public static final Color C_TINT = new Color(0xFF, 0xD2, 0x3F, 0x3A);
     public static final Color C_TINT_KEY = new Color(0xFF, 0xD2, 0x3F, 0x5C);
     public static final Color KEY_C_TEXT = new Color(0x6B4E00);
-    public static final Color BAR_LINE = new Color(0x6C7C8C);
-    public static final Color BEAT_LINE = new Color(0x46525F);
-    public static final Color GRID_LINE = new Color(0x2E3742);
+    public static final Color BAR_LINE = new Color(0x7E8C99);
+    public static final Color BEAT_LINE = new Color(0x4A5563);
+    public static final Color GRID_LINE = new Color(0x333B45);
     public static final Color LANE_SEPARATOR = new Color(0x0F1318);
     public static final Color ACCENT = new Color(0x3D8BFD);
     public static final Color TEXT_ON_DARK = new Color(0xE7ECF3);
@@ -44,6 +44,12 @@ public final class Theme {
     public static final Color REST_SELECTED = new Color(0xFFD08A);
     /** 收尾锁定标记：空心圆。 */
     public static final Color LOCK_RING = new Color(0xE7ECF3);
+    /** 输入模式光标：红色圆点。 */
+    public static final Color INPUT_CURSOR = new Color(0xFF3B30);
+    /** 输入模式：按下空格时“正在输入”的幽灵条。 */
+    public static final Color INPUT_GHOST = new Color(0xFF, 0x3B, 0x30, 0x59);
+    /** 输入模式：光标所在的竖线（帮助对齐 tick，很淡）。 */
+    public static final Color INPUT_GUIDE = new Color(0xFF, 0x3B, 0x30, 0x4D);
     public static final Color SELECTION_OUTLINE = new Color(0xFFE082);
     /** 活动音轨泳道底色（很淡的一层，代替以前那种整条泳道的蓝框）。 */
     public static final Color LANE_ACTIVE_TINT = new Color(0x3D, 0x8B, 0xFD, 0x12);

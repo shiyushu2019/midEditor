@@ -16,7 +16,7 @@ final class PlaybackCommands {
         var registry = app.registry();
 
         AppCommand playPause = new AppCommand(AppCommandIds.PLAY_PLAY_PAUSE, "播放 / 暂停", CommandScope.DOCUMENT,
-                FileCommands.key(KeyEvent.VK_SPACE, 0),
+                FileCommands.key(KeyEvent.VK_F5, 0),
                 ctx -> {
                     if (TextFocusGuard.isTextEditing()) {
                         return;
@@ -27,18 +27,22 @@ final class PlaybackCommands {
                 ctx -> ctx.app().playback().isPlaying() && ctx.app().playback().owner() == ctx.document());
         playPause.putIcon(Icons.PLAY);
         registry.register(playPause);
+        // 老习惯：空格也能播放 / 暂停（输入模式下空格归输入用）
+        registry.bindAlias(AppCommandIds.PLAY_PLAY_PAUSE, FileCommands.key(KeyEvent.VK_SPACE, 0));
 
         AppCommand stop = new AppCommand(AppCommandIds.PLAY_STOP, "停止", CommandScope.DOCUMENT,
-                FileCommands.key(KeyEvent.VK_SPACE, InputEvent.CTRL_DOWN_MASK),
+                FileCommands.key(KeyEvent.VK_F5, InputEvent.CTRL_DOWN_MASK),
                 ctx -> ctx.document().stopTransport(), CommandContext::hasDocument, null);
         stop.putIcon(Icons.STOP);
         registry.register(stop);
+        registry.bindAlias(AppCommandIds.PLAY_STOP, FileCommands.key(KeyEvent.VK_SPACE, InputEvent.CTRL_DOWN_MASK));
 
         AppCommand rewind = new AppCommand(AppCommandIds.PLAY_REWIND, "回到开头", CommandScope.DOCUMENT,
-                FileCommands.key(KeyEvent.VK_HOME, InputEvent.CTRL_DOWN_MASK),
+                FileCommands.key(KeyEvent.VK_F6, 0),
                 ctx -> ctx.document().rewind(), CommandContext::hasDocument, null);
         rewind.putIcon(Icons.REWIND);
         registry.register(rewind);
+        registry.bindAlias(AppCommandIds.PLAY_REWIND, FileCommands.key(KeyEvent.VK_HOME, InputEvent.CTRL_DOWN_MASK));
 
         AppCommand loop = new AppCommand(AppCommandIds.PLAY_TOGGLE_LOOP, "循环播放", CommandScope.DOCUMENT,
                 FileCommands.key(KeyEvent.VK_L, InputEvent.CTRL_DOWN_MASK),

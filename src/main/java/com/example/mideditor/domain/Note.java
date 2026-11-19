@@ -108,6 +108,21 @@ public final class Note {
         return copy;
     }
 
+    /**
+     * 复制但换一个新身份。
+     *
+     * <p>
+     * 拆分出来的另一半必须有自己的 id：选区 / 锁定 / 撤销都是按 id 认人的，
+     * 两半共用一个 id 时拖动一半会把另一半也一起拖走（用户看到的现象：刚拆开的那一段
+     * 瞬间变成长条休止符）。
+     * </p>
+     */
+    public Note copyWithNewId() {
+        Note copy = new Note(java.util.UUID.randomUUID(), pitch, startTick, durationTicks, velocity, rest);
+        copy.lockLeaderId = lockLeaderId;
+        return copy;
+    }
+
     private static int clamp(int v, int lo, int hi) {
         return v < lo ? lo : Math.min(v, hi);
     }

@@ -25,6 +25,7 @@ import com.example.mideditor.domain.Track;
  *   Ctrl+←  左端向左（右端不动）
  *   Shift+→ 左端向右（右端不动）
  *   Shift+← 右端向左（左端不动）
+ *   裸方向键：移动选中框（换选中对象），不动任何平行线
  * </pre>
  * 
  * 事件走 {@link ArrowKeyDispatcher}，不依赖焦点落在卷帘上。
@@ -69,9 +70,10 @@ class ArrowKeyDispatchTest {
             assertEquals(480, note[0].startTick(), "Shift+← 左端不动");
             assertEquals(960, note[0].endTick(), "Shift+← 右端 -1 格");
 
+            // 裸方向键不再移动平行线：它只挪选中框（这里只有一条，挪不动）
             press(app, dispatcher, KeyEvent.VK_RIGHT, 0);
-            assertEquals(600, note[0].startTick(), "裸 → 是整体右移一格");
-            assertEquals(1080, note[0].endTick(), "整体移动不改长度");
+            assertEquals(480, note[0].startTick(), "裸 → 不动平行线");
+            assertEquals(960, note[0].endTick(), "裸 → 也不改长度");
         } finally {
             close(app, holder[0]);
         }

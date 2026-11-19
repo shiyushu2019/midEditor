@@ -1,12 +1,12 @@
 package com.example.mideditor.ui.frame;
 
-import com.example.mideditor.app.AppContext;
-import com.example.mideditor.command.AppCommandIds;
-import com.example.mideditor.ui.theme.Theme;
-
 import javax.swing.Action;
 import javax.swing.JButton;
 import javax.swing.JToolBar;
+
+import com.example.mideditor.app.AppContext;
+import com.example.mideditor.command.AppCommandIds;
+import com.example.mideditor.ui.theme.Theme;
 
 /** 工具栏：与菜单、快捷键共享同一套命令 Action。 */
 public final class ToolBarBuilder {
@@ -36,6 +36,9 @@ public final class ToolBarBuilder {
         add(bar, AppCommandIds.EDIT_COPY);
         add(bar, AppCommandIds.EDIT_PASTE);
         bar.addSeparator();
+        addToggle(bar, AppCommandIds.EDIT_INPUT_MODE);
+        addToggle(bar, AppCommandIds.EDIT_INPUT_BEAT_SNAP);
+        bar.addSeparator();
         add(bar, AppCommandIds.PLAY_PLAY_PAUSE);
         add(bar, AppCommandIds.PLAY_STOP);
         add(bar, AppCommandIds.PLAY_REWIND);
@@ -53,6 +56,20 @@ public final class ToolBarBuilder {
             return;
         }
         JButton button = new JButton(action);
+        button.setHideActionText(true);
+        button.setFocusable(false);
+        button.setToolTipText(tooltip(action, commandId));
+        button.setMargin(new java.awt.Insets(2, 6, 2, 6));
+        bar.add(button);
+    }
+
+    /** 可切换按钮（开关类命令）：按下状态跟命令的选中态同步。 */
+    private void addToggle(JToolBar bar, String commandId) {
+        Action action = app.registry().action(commandId);
+        if (action == null) {
+            return;
+        }
+        javax.swing.JToggleButton button = new javax.swing.JToggleButton(action);
         button.setHideActionText(true);
         button.setFocusable(false);
         button.setToolTipText(tooltip(action, commandId));

@@ -36,6 +36,9 @@ public final class AppContext {
     private MainFrame mainFrame;
     private DockManager dock;
     private ArrowKeyDispatcher arrowKeys;
+    private InputModeDispatcher inputModeKeys;
+    private java.beans.PropertyChangeListener focusWatch;
+    private java.awt.event.AWTEventListener inputWatcher;
     private boolean refreshing;
 
     public void initialize(JComponent keyTarget) {
@@ -47,6 +50,35 @@ public final class AppContext {
         // 方向键兜底：焦点不在卷帘上时，Swing 的键绑定会完全失效，这里直接接管
         arrowKeys = new ArrowKeyDispatcher(this);
         KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(arrowKeys);
+        // 输入模式：WASD / Q / 空格（空格必须优先于播放/暂停）
+        inputModeKeys = new InputModeDispatcher(this);
+        KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(inputModeKeys);
+        // 按住空格时窗口丢了焦点（Alt+Tab、弹窗……）→ 松手事件永远收不到，这里补一次收尾，避免卡音/卡状态
+        focusWatch = event -> {
+            if (!"focusedWindow".equals(event.getPropertyName())) {
+                return;
+            }
+            Object next = event.getNewValue();
+            if (mainFrame == null || next == mainFrame) {
+                return;
+            }
+            MidiDocumentView view = documents.activeView();
+            if (view == null || !view.hasHeldInputSound()) {
+                return;
+            }
+            if (javax.swing.SwingUtilities.isEventDispatchThread()) {
+                view.releaseInputSounds();
+            } else {
+                javax.swing.SwingUtilities.invokeLater(view::releaseInputSounds);
+            }
+        };
+        KeyboardFocusManager.getCurrentKeyboardFocusManager()
+                .addPropertyChangeListener("focusedWindow", focusWatch);
+        // 让 TextFocusGuard 知道“这次是鼠标点的”：点按钮时焦点可能还在 BPM 输入框里，
+        // 不该被当成在打字（否则改完 BPM 点播放会没反应）
+        inputWatcher = event -> com.example.mideditor.command.TextFocusGuard.noteMouseEvent();
+        java.awt.Toolkit.getDefaultToolkit().addAWTEventListener(inputWatcher,
+                java.awt.AWTEvent.MOUSE_EVENT_MASK);
         documents.addChangeListener(this::refreshApplicationState);
         playback.addListener(engine -> {
             refreshApplicationState();
@@ -169,6 +201,19 @@ public final class AppContext {
         if (arrowKeys != null) {
             KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(arrowKeys);
             arrowKeys = null;
+        }
+        if (inputModeKeys != null) {
+            KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(inputModeKeys);
+            inputModeKeys = null;
+        }
+        if (focusWatch != null) {
+            KeyboardFocusManager.getCurrentKeyboardFocusManager()
+                    .removePropertyChangeListener("focusedWindow", focusWatch);
+            focusWatch = null;
+        }
+        if (inputWatcher != null) {
+            java.awt.Toolkit.getDefaultToolkit().removeAWTEventListener(inputWatcher);
+            inputWatcher = null;
         }
         playback.stop();
         // SynthService 是 AutoCloseable，用 try-with-resources 保证释放

@@ -25,7 +25,6 @@ import javax.sound.midi.ShortMessage;
 
 import com.example.mideditor.document.MidiDocument;
 import com.example.mideditor.domain.Note;
-import com.example.mideditor.domain.PitchRange;
 import com.example.mideditor.domain.RawChannelEvent;
 import com.example.mideditor.domain.RawMetaEvent;
 import com.example.mideditor.domain.TempoMap;
@@ -43,7 +42,11 @@ public final class MidiFileCodec {
     private static final int META_TEMPO = 0x51;
     private static final int META_TIME_SIGNATURE = 0x58;
     private static final int DRUM_CHANNEL = 9;
-    private static final String RANGE_MARKER = "mideditor:yRange=";
+    /**
+     * 旧版本写进文件的「音域窗口」标记。视图状态（缩放 / 上下滑动）不属于乐曲数据，
+     * 现在既不写也不读 —— 只在这里留着，读旧文件时把它丢掉，免得被当成外来 meta 又存回去。
+     */
+    private static final String LEGACY_RANGE_MARKER = "mideditor:yRange=";
     /** 休止符（可视化占位）不入 MIDI 音符事件，存在自定义 text meta 里。 */
     private static final String REST_MARKER = "mideditor:rest=";
 
@@ -115,7 +118,6 @@ public final class MidiFileCodec {
         for (javax.sound.midi.Track midiTrack : sequence.getTracks()) {
             boolean conductor = midiTrackIndex++ == 0;
             String trackName = findTrackName(midiTrack);
-            PitchRange storedRange = findStoredRange(midiTrack);
             List<Note> storedRests = findStoredRests(midiTrack);
             Map<Integer, ChannelData> channels = new LinkedHashMap<>();
             Map<Integer, Deque<long[]>> pendingNotes = new HashMap<>();
@@ -180,11 +182,8 @@ public final class MidiFileCodec {
                     metaAttached = true;
                 }
                 track.sortNotes();
-                if (storedRange != null) {
-                    track.setYRange(storedRange);
-                } else {
-                    track.autoRangeFromNotes();
-                }
+                // 音域（缩放 / 上下位置）不入文件：按内容重新适配，保证每次打开都是「干净」的
+                track.autoRangeFromNotes();
                 doc.addTrack(track);
             }
         }
@@ -208,35 +207,13 @@ public final class MidiFileCodec {
             }
             if (type == META_MARKER_TEXT) {
                 String text = decodeText(meta.getData());
-                if (text.startsWith(RANGE_MARKER) || text.startsWith(REST_MARKER)) {
-                    continue; // 本软件自己的标记
+                if (text.startsWith(LEGACY_RANGE_MARKER) || text.startsWith(REST_MARKER)) {
+                    continue; // 本软件自己的标记（音域标记是旧版本写的，读入时直接丢弃）
                 }
             }
             result.add(new RawMetaEvent(event.getTick(), type, meta.getData()));
         }
         return result;
-    }
-
-    private static PitchRange findStoredRange(javax.sound.midi.Track midiTrack) {
-        for (int i = 0; i < midiTrack.size(); i++) {
-            MidiMessage message = midiTrack.get(i).getMessage();
-            if (!(message instanceof MetaMessage meta) || meta.getType() != META_MARKER_TEXT) {
-                continue;
-            }
-            String text = decodeText(meta.getData());
-            if (!text.startsWith(RANGE_MARKER)) {
-                continue;
-            }
-            String[] parts = text.substring(RANGE_MARKER.length()).split(",");
-            if (parts.length == 2) {
-                try {
-                    return new PitchRange(Integer.parseInt(parts[0].trim()), Integer.parseInt(parts[1].trim()));
-                } catch (NumberFormatException ignored) {
-                    // 忽略非法标记
-                }
-            }
-        }
-        return null;
     }
 
     private static String findTrackName(javax.sound.midi.Track midiTrack) {
@@ -367,9 +344,6 @@ public final class MidiFileCodec {
                     shortMessage(ShortMessage.CONTROL_CHANGE, track.channel(), 7, track.volume()), 0));
             midiTrack.add(new MidiEvent(
                     shortMessage(ShortMessage.CONTROL_CHANGE, track.channel(), 10, track.pan()), 0));
-            midiTrack.add(new MidiEvent(
-                    metaMessage(META_MARKER_TEXT, RANGE_MARKER + track.yRange().low() + "," + track.yRange().high()),
-                    0));
             for (RawMetaEvent foreign : track.rawMetaEvents()) {
                 midiTrack.add(new MidiEvent(
                         new MetaMessage(foreign.type(), foreign.data(), foreign.length()), foreign.tick()));

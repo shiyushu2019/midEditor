@@ -51,8 +51,8 @@ public final class DockPanel extends JPanel {
         button.setFont(Theme.SMALL_FONT);
         button.setToolTipText(tooltip);
         button.setFocusable(false);
-        button.setMargin(new java.awt.Insets(0, 4, 0, 4));
-        button.setPreferredSize(new Dimension(24, 20));
+        button.setMargin(new java.awt.Insets(0, 0, 0, 0));
+        button.setPreferredSize(new Dimension(22, 20));
         return button;
     }
 
