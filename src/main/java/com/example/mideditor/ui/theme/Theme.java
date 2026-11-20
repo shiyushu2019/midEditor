@@ -52,6 +52,10 @@ public final class Theme {
     public static final Color INPUT_GHOST = new Color(0xFF, 0x3B, 0x30, 0x59);
     /** 输入模式：光标所在的竖线（帮助对齐 tick，很淡）。 */
     public static final Color INPUT_GUIDE = new Color(0xFF, 0x3B, 0x30, 0x4D);
+    /** 输入模式：按住输入时浮在光标旁的「音名 + 简谱数字」小牌。 */
+    public static final Color INPUT_BADGE_FILL = new Color(0x20, 0x24, 0x2A, 0xE6);
+    public static final Color INPUT_BADGE_BORDER = new Color(0xE7ECF3);
+    public static final Color INPUT_BADGE_TEXT = new Color(0xF2F5F9);
     public static final Color SELECTION_OUTLINE = new Color(0xFFE082);
     /** 活动音轨泳道底色（很淡的一层，代替以前那种整条泳道的蓝框）。 */
     public static final Color LANE_ACTIVE_TINT = new Color(0x3D, 0x8B, 0xFD, 0x12);

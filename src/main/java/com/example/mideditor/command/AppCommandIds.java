@@ -31,6 +31,8 @@ public final class AppCommandIds {
     public static final String EDIT_INPUT_MODE = "edit.inputMode";
     /** 输入模式的节奏辅助：起点与时值自动吸附到拍。 */
     public static final String EDIT_INPUT_BEAT_SNAP = "edit.inputBeatSnap";
+    /** 一键移调：整个文档平移半音数，并把调号跟着转。 */
+    public static final String EDIT_TRANSPOSE = "edit.transpose";
 
     public static final String NOTE_ADD = "note.add";
     public static final String NOTE_LOCK = "note.lock";

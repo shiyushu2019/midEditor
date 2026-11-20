@@ -49,6 +49,8 @@ public final class MidiFileCodec {
     private static final String LEGACY_RANGE_MARKER = "mideditor:yRange=";
     /** 休止符（可视化占位）不入 MIDI 音符事件，存在自定义 text meta 里。 */
     private static final String REST_MARKER = "mideditor:rest=";
+    /** 文档的调号（主音音级 0..11，小调后面跟一个 m），只在非 C 大调时写，免得给旧文件添噪。 */
+    private static final String KEY_MARKER = "mideditor:key=";
 
     private MidiFileCodec() {
     }
@@ -75,9 +77,38 @@ public final class MidiFileCodec {
         doc.setName(path.getFileName().toString());
 
         readTempoAndSignatures(sequence, doc);
+        readKeySignature(sequence, doc);
         readTracks(sequence, doc);
         doc.setDirty(false);
         return doc;
+    }
+
+    /** 读回本软件写的调号标记（没有就保持默认 C）。 */
+    private static void readKeySignature(Sequence sequence, MidiDocument doc) {
+        for (javax.sound.midi.Track track : sequence.getTracks()) {
+            for (int i = 0; i < track.size(); i++) {
+                if (!(track.get(i).getMessage() instanceof MetaMessage meta)
+                        || meta.getType() != META_MARKER_TEXT) {
+                    continue;
+                }
+                String text = decodeText(meta.getData());
+                if (!text.startsWith(KEY_MARKER)) {
+                    continue;
+                }
+                String value = text.substring(KEY_MARKER.length()).trim();
+                boolean minor = value.endsWith("m");
+                if (minor) {
+                    value = value.substring(0, value.length() - 1).trim();
+                }
+                try {
+                    doc.setKeyTonic(Integer.parseInt(value));
+                    doc.setKeyMinor(minor);
+                } catch (NumberFormatException ignored) {
+                    // 非法标记：保持默认
+                }
+                return;
+            }
+        }
     }
 
     private static void readTempoAndSignatures(Sequence sequence, MidiDocument doc) {
@@ -207,7 +238,8 @@ public final class MidiFileCodec {
             }
             if (type == META_MARKER_TEXT) {
                 String text = decodeText(meta.getData());
-                if (text.startsWith(LEGACY_RANGE_MARKER) || text.startsWith(REST_MARKER)) {
+                if (text.startsWith(LEGACY_RANGE_MARKER) || text.startsWith(REST_MARKER)
+                        || text.startsWith(KEY_MARKER)) {
                     continue; // 本软件自己的标记（音域标记是旧版本写的，读入时直接丢弃）
                 }
             }
@@ -321,6 +353,10 @@ public final class MidiFileCodec {
         }
         for (TimeSignature signature : doc.timeSignatures()) {
             conductor.add(new MidiEvent(metaTimeSignature(signature), signature.startTick()));
+        }
+        if (doc.keyTonic() != 0 || doc.keyMinor()) {
+            conductor.add(new MidiEvent(metaMessage(META_MARKER_TEXT,
+                    KEY_MARKER + doc.keyTonic() + (doc.keyMinor() ? "m" : "")), 0));
         }
         for (RawMetaEvent foreign : doc.conductorMeta()) {
             conductor.add(new MidiEvent(

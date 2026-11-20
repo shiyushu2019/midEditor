@@ -2,6 +2,7 @@ package com.example.mideditor.document;
 
 import java.awt.GraphicsEnvironment;
 import java.awt.event.KeyEvent;
+import java.util.List;
 
 import javax.swing.SwingUtilities;
 
@@ -799,47 +800,60 @@ class InputModeTest {
             int base = Math.floorDiv(view.inputCursorPitch(), 12) * 12;
             int ctrl = java.awt.event.InputEvent.CTRL_DOWN_MASK;
 
-            // 按住 =（+）：下一个数字整体高一个八度
+            // 按一下 =（+）：紧接着的那一个数字高一个八度
             assertTrue(dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_EQUALS, 0)));
-            assertEquals(1, view.inputOctaveHold(), "按住 = 应当挂上 +1 八度");
+            assertEquals(1, view.inputOctaveHold(), "按 = 应当挂上 +1 八度");
             now[0] = 0;
             dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_NUMPAD1, 0));
-            assertEquals(base + 12, view.inputCursorPitch(), "= 按着时 1 落在高八度");
+            assertEquals(base + 12, view.inputCursorPitch(), "= 之后的 1 落在高八度");
             now[0] = 240_000_000L;
             dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_NUMPAD1, 0));
+            assertEquals(0, view.inputOctaveHold(), "临时偏移用完就撤，不用按 + 扳回来");
 
-            // 还按着 =：下一个数字照样高八度（按物理键状态判定，不随音符归零）
+            // = 还按着也一样：下一个数字回到原八度
             moveCursorPitchTo(view, base);
             now[0] = 400_000_000L;
             dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_NUMPAD2, 0));
-            assertEquals(base + 14, view.inputCursorPitch(), "= 一直按着，2 也高八度");
+            assertEquals(base + 2, view.inputCursorPitch(), "第二个数字回到原来的八度");
             now[0] = 640_000_000L;
             dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_NUMPAD2, 0));
 
+            // 按住不放的自动重复不能再把偏移挂回来
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_EQUALS, 0));
+            assertEquals(0, view.inputOctaveHold(), "自动重复不算新的一次按键");
             dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_EQUALS, 0));
-            assertEquals(0, view.inputOctaveHold(), "松开 = 就回到默认八度");
+            // 松开后重新按才算（挂在临时的这一次上）
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_EQUALS, 0));
+            assertEquals(1, view.inputOctaveHold(), "重新按下才重新挂上");
 
-            // 按住 -（_）：低一个八度
+            // Ctrl + = + 数字 = 两个八度（用的还是刚挂上的那一次）
             moveCursorPitchTo(view, base);
-            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_MINUS, 0));
-            assertEquals(-1, view.inputOctaveHold(), "按住 - 应当挂上 -1 八度");
-            now[0] = 800_000_000L;
-            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_NUMPAD5, 0));
-            assertEquals(base - 5, view.inputCursorPitch(), "- 按着时 5 落在低八度");
-            now[0] = 1_040_000_000L;
-            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_NUMPAD5, 0));
-            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_MINUS, 0));
-
-            // Ctrl + +/- + 数字 = 两个八度
-            moveCursorPitchTo(view, base);
-            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_EQUALS, ctrl));
             now[0] = 1_200_000_000L;
             dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_NUMPAD1, ctrl));
             assertEquals(base + 24, view.inputCursorPitch(), "Ctrl + = + 1 = 高两个八度");
             now[0] = 1_440_000_000L;
             dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_NUMPAD1, ctrl));
             dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_EQUALS, 0));
+            assertEquals(0, view.inputOctaveHold(), "两个八度也是临时的");
 
+            // 用户场景：大键盘 - + 小键盘 7 = 低音 7；再敲 7 回到原来的八度（不用按 + 扳回来）
+            moveCursorPitchTo(view, base);
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_MINUS, 0));
+            assertEquals(-1, view.inputOctaveHold(), "按住 - 应当挂上 -1 八度");
+            now[0] = 800_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_NUMPAD7, 0));
+            assertEquals(base - 1, view.inputCursorPitch(), "- 之后的 7 落在低八度（低八度的 si）");
+            now[0] = 1_040_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_NUMPAD7, 0));
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_MINUS, 0));
+
+            now[0] = 1_200_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_NUMPAD7, 0));
+            assertEquals(base + 11, view.inputCursorPitch(), "下一个 7 回到原来的八度");
+            now[0] = 1_440_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_NUMPAD7, 0));
+
+            // Ctrl + - + 数字 = 低两个八度
             moveCursorPitchTo(view, base);
             dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_MINUS, ctrl));
             now[0] = 1_600_000_000L;
@@ -849,8 +863,20 @@ class InputModeTest {
             dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_NUMPAD1, ctrl));
             dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_MINUS, 0));
 
+            // 小键盘 +/- 那套不受影响：jump 可以累积，输完一个音才归零
+            moveCursorPitchTo(view, base);
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_ADD, 0));
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_ADD, 0));
+            assertEquals(2, view.inputOctaveJump(), "小键盘 + 照样能累积两个八度");
+            now[0] = 2_000_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_NUMPAD3, 0));
+            assertEquals(base + 24 + 4, view.inputCursorPitch(), "3（mi）高两个八度");
+            now[0] = 2_240_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_NUMPAD3, 0));
+            assertEquals(0, view.inputOctaveJump(), "输完一个音 jump 归零");
+
             java.util.List<Note> sounding = soundingNotes(view.activeTrack());
-            int[] expected = { base + 12, base + 14, base - 5, base + 24, base - 24 };
+            int[] expected = { base + 12, base + 2, base + 24, base - 1, base + 11, base - 24, base + 28 };
             assertEquals(expected.length, sounding.size(), describe(view.activeTrack()));
             for (int i = 0; i < expected.length; i++) {
                 assertEquals(expected[i], sounding.get(i).pitch(), "第 " + (i + 1) + " 条音高");
@@ -893,42 +919,284 @@ class InputModeTest {
         });
     }
 
-    /** 每次进入输入模式，红色光标都落在当前可见频谱的正中间（横向中点、纵向泳道中间那一行）。 */
+    /** 一个音都没有时，进入输入模式光标落在时间轴最左边（tick 0）的 C 上。 */
     @Test
-    void enteringInputModePutsTheCursorInTheMiddleOfTheVisibleSpectrum() throws Exception {
+    void enteringInputModeWithNoNotesPutsTheCursorAtTheStart() throws Exception {
         withDocument((app, view, dispatcher) -> {
             SwingUtilities.invokeAndWait(() -> {
                 var roll = view.pianoRoll();
                 roll.scrollPane().getViewport().setSize(1000, 700);
                 roll.canvas().setSize(6000, 800);
-                roll.scrollPane().getViewport().setViewPosition(new java.awt.Point(900, 0));
+                roll.scrollPane().getViewport().setViewPosition(new java.awt.Point(2000, 0));
             });
             java.awt.Rectangle visible = view.pianoRoll().visibleRect();
             assertTrue(visible.width > 100, "前提：视口要有尺寸，实际 " + visible);
-            int ppq = view.document().ppq();
-            long expectedTick = view.grid().snap(
-                    view.pianoRoll().timeline().tickAtX(visible.x + visible.width / 2, ppq), ppq);
-            int expectedPitch = view.pianoRoll().pitchAt(view.activeTrack(), 0,
-                    view.pianoRoll().laneTop(0) + view.pianoRoll().laneHeight() / 2);
 
             SwingUtilities.invokeAndWait(() -> view.setInputMode(true));
-            assertEquals(expectedTick, view.inputCursorTick(), "横向落在视口中点（吸附网格）");
-            assertEquals(expectedPitch, view.inputCursorPitch(), "纵向落在泳道中间那一行");
-            assertTrue(view.inputCursorTick() > 0, "滚过去之后不该还停在播放头 0");
+            assertEquals(0, view.inputCursorTick(), "空文档：光标回到最左边（tick 0）");
+            assertEquals(60, view.inputCursorPitch(), "音高落在 C（默认音域中央就是 C4）");
+            assertEquals(0, view.inputCursorPitch() % 12, "确实是个 C");
+            assertEquals(0, view.pianoRoll().visibleRect().x, "频谱也跟着拉回开头");
+        });
+    }
 
-            // 退出、滚动到别处再进来：照样重新居中
-            long first = view.inputCursorTick();
+    /** 进入输入模式时光标接在最后一个音后面。 */
+    @Test
+    void enteringInputModePutsTheCursorAfterTheLastNote() throws Exception {
+        withDocument((app, view, dispatcher) -> {
             SwingUtilities.invokeAndWait(() -> {
-                view.setInputMode(false);
-                view.pianoRoll().scrollPane().getViewport()
-                        .setViewPosition(new java.awt.Point(3000, 0));
+                Track track = view.activeTrack();
+                track.addNote(new Note(64, 0, 240, 100));
+                track.addNote(new Note(67, 480, 240, 100));
+                track.sortNotes();
+                view.afterEdit(true);
             });
-            java.awt.Rectangle moved = view.pianoRoll().visibleRect();
-            long expectedAgain = view.grid().snap(
-                    view.pianoRoll().timeline().tickAtX(moved.x + moved.width / 2, ppq), ppq);
             SwingUtilities.invokeAndWait(() -> view.setInputMode(true));
-            assertEquals(expectedAgain, view.inputCursorTick(), "重新进入同样落在新的视口中点");
-            assertTrue(view.inputCursorTick() > first, "新视口更靠右，光标也该更靠右");
+            assertEquals(720, view.inputCursorTick(), "光标接在最后一个音的末尾");
+            assertEquals(67, view.inputCursorPitch(), "音高也取最后一个音");
+        });
+    }
+
+    /** Ctrl+I 只有两态：关 ⇄ 输入模式＋节奏辅助。 */
+    @Test
+    void ctrlITogglesInputModeWithBeatSnapInTwoStates() throws Exception {
+        withDocument((app, view, dispatcher) -> {
+            SwingUtilities.invokeAndWait(
+                    () -> app.router().dispatch(com.example.mideditor.command.AppCommandIds.EDIT_INPUT_MODE));
+            assertTrue(view.inputMode(), "第一下进入输入模式");
+            assertTrue(view.inputBeatSnap(), "并且带节奏辅助");
+            SwingUtilities.invokeAndWait(
+                    () -> app.router().dispatch(com.example.mideditor.command.AppCommandIds.EDIT_INPUT_MODE));
+            assertFalse(view.inputMode(), "第二下直接关掉（没有中间态）");
+        });
+    }
+
+    /** 调号是每个文档自己的属性，默认 C，小键盘简谱按调号取音。 */
+    @Test
+    void keySignatureIsPerDocumentAndDrivesTheDegrees() throws Exception {
+        withDocument((app, view, dispatcher) -> {
+            long[] now = { 0 };
+            view.setNanoClockForTesting(() -> now[0]);
+            assertEquals(0, view.document().keyTonic(), "默认 C");
+            SwingUtilities.invokeAndWait(() -> {
+                view.setKeySignature(7); // G 调（传输条上那个下拉框走的就是这条路径）
+                view.setInputMode(true);
+            });
+            int octave = Math.floorDiv(view.inputCursorPitch(), 12);
+            now[0] = 0;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_NUMPAD1, 0));
+            assertEquals(octave * 12 + 7, view.inputCursorPitch(), "1 = 调主音 G");
+            assertEquals("1", view.inputBadgeDegree(), "简谱数字跟着调号走");
+            now[0] = 240_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_NUMPAD1, 0));
+
+            SwingUtilities.invokeAndWait(app.documents()::newDocument);
+            assertEquals(0, app.documents().activeView().document().keyTonic(), "新文档各自一份（默认 C）");
+        });
+    }
+
+    /** 按住空格 / Q / 小键盘数字时显示「音名 + 简谱数字」浮牌，松手后 1 秒才消失。 */
+    @Test
+    void pitchBadgeShowsWhileHoldingAndLingersOneSecond() throws Exception {
+        withDocument((app, view, dispatcher) -> {
+            long[] now = { 0 };
+            view.setNanoClockForTesting(() -> now[0]);
+            SwingUtilities.invokeAndWait(() -> view.setInputMode(true));
+            int pitch = view.inputCursorPitch();
+            long tick = view.inputCursorTick();
+            assertTrue(view.inputBadgeVisible(), "刚进输入模式也会提示一下当前音");
+            now[0] = 1_500_000_000L;
+            assertFalse(view.inputBadgeVisible(), "这个提示 1 秒后自动消失");
+
+            now[0] = 2_000_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_SPACE, 0));
+            assertTrue(view.inputBadgeVisible(), "按住空格就显示");
+            assertEquals(pitch, view.inputBadgePitch(), "音高取按下的光标");
+            assertEquals(tick, view.inputBadgeTick(), "贴在按下之前的光标位置");
+            assertEquals("C4", view.inputBadgePitchName(), "左格：科学记音法");
+            assertEquals("1", view.inputBadgeDegree(), "右格：当前调的简谱数字");
+
+            now[0] = 2_300_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_SPACE, 0));
+            assertTrue(view.inputBadgeVisible(), "松手后还没到 1 秒，仍然显示");
+            now[0] = 2_900_000_000L;
+            assertTrue(view.inputBadgeVisible(), "0.9 秒时还在");
+            now[0] = 3_400_000_000L;
+            assertFalse(view.inputBadgeVisible(), "超过 1 秒就消失");
+
+            // 小键盘数字：音名跟着音高走，简谱数字跟着级数走
+            now[0] = 4_000_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_NUMPAD7, 0));
+            assertTrue(view.inputBadgeVisible(), "小键盘数字也显示");
+            assertEquals("B4", view.inputBadgePitchName(), "7 = si");
+            assertEquals("7", view.inputBadgeDegree());
+            now[0] = 4_240_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_NUMPAD7, 0));
+
+            // Q 试听同样显示
+            now[0] = 4_600_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_Q, 0));
+            assertTrue(view.inputBadgeVisible(), "Q 试听也显示浮牌");
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_Q, 0));
+            assertTrue(view.inputBadgeVisible(), "Q 松手后也停留一会儿");
+        });
+    }
+
+    /** 光标换到一个新音（W/S、Ctrl+U/L）时也亮一下牌子，1 秒后消失；只挪时间不亮。 */
+    @Test
+    void switchingToOneNoteLightsThePitchBadgeForASecond() throws Exception {
+        withDocument((app, view, dispatcher) -> {
+            long[] now = { 0 };
+            view.setNanoClockForTesting(() -> now[0]);
+            SwingUtilities.invokeAndWait(() -> view.setInputMode(true));
+            int pitch = view.inputCursorPitch();
+
+            now[0] = 1_500_000_000L;
+            assertFalse(view.inputBadgeVisible(), "前提：进场提示已经过了 1 秒");
+
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_W, 0));
+            assertTrue(view.inputBadgeVisible(), "换到一个新音就亮牌子");
+            assertEquals(pitch + 1, view.inputBadgePitch(), "亮的是新音高");
+            assertEquals("C#4", view.inputBadgePitchName());
+
+            now[0] = 2_000_000_000L;
+            assertTrue(view.inputBadgeVisible(), "0.5 秒时还在");
+            now[0] = 2_600_000_000L;
+            assertFalse(view.inputBadgeVisible(), "1 秒后消失");
+
+            // 只左右挪时间（音高没变）不亮
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_D, 0));
+            assertFalse(view.inputBadgeVisible(), "只挪时间不该亮牌子");
+
+            // Ctrl+U 整八度也算“换到一个新音”
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_U,
+                    java.awt.event.InputEvent.CTRL_DOWN_MASK));
+            assertTrue(view.inputBadgeVisible(), "Ctrl+U 也亮");
+            assertEquals(pitch + 13, view.inputBadgePitch());
+            assertEquals("C#5", view.inputBadgePitchName());
+        });
+    }
+
+    /** 浮牌真的画在画布上了（边框颜色出现在图里）。 */
+    @Test
+    void pitchBadgeIsPainted() throws Exception {
+        withDocument((app, view, dispatcher) -> {
+            SwingUtilities.invokeAndWait(() -> view.setInputMode(true));
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_SPACE, 0));
+            try {
+                SwingUtilities.invokeAndWait(() -> {
+                    var roll = view.pianoRoll();
+                    var canvas = roll.canvas();
+                    int width = 900;
+                    int height = Math.max(300, roll.laneHeight());
+                    canvas.setSize(width, height);
+                    canvas.doLayout();
+                    java.awt.image.BufferedImage image = new java.awt.image.BufferedImage(
+                            width, height, java.awt.image.BufferedImage.TYPE_INT_RGB);
+                    java.awt.Graphics2D g = image.createGraphics();
+                    g.setColor(java.awt.Color.BLACK);
+                    g.fillRect(0, 0, width, height);
+                    canvas.paint(g);
+                    g.dispose();
+                    int border = Theme.INPUT_BADGE_BORDER.getRGB();
+                    int hits = 0;
+                    for (int y = 0; y < height; y++) {
+                        for (int x = 0; x < width; x++) {
+                            if (image.getRGB(x, y) == border) {
+                                hits++;
+                            }
+                        }
+                    }
+                    assertTrue(hits > 10, "按住输入时浮牌应当画出来（边框像素 " + hits + " 个）");
+                });
+            } finally {
+                dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_SPACE, 0));
+            }
+        });
+    }
+
+    /** 小键盘 0 输入休止符：按住多久就留多长的空，光标跟着走。 */
+    @Test
+    void numpadZeroEntersARest() throws Exception {
+        withDocument((app, view, dispatcher) -> {
+            long[] now = { 0 };
+            view.setNanoClockForTesting(() -> now[0]);
+            SwingUtilities.invokeAndWait(() -> view.setInputMode(true));
+
+            long time = 0;
+            now[0] = time;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_NUMPAD1, 0));
+            time += 240;
+            now[0] = time;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_NUMPAD1, 0));
+
+            now[0] = time;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_NUMPAD0, 0));
+            assertTrue(view.inputNoteHeld(), "0 也是“按住输入”");
+            assertEquals("0", view.inputBadgeDegree(), "浮牌右格写 0");
+            time += 240;
+            now[0] = time;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_NUMPAD0, 0));
+
+            now[0] = time;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_NUMPAD5, 0));
+            time += 240;
+            now[0] = time;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_NUMPAD5, 0));
+
+            List<Note> notes = view.activeTrack().notes();
+            assertEquals(3, notes.size(), "音 · 休止 · 音：" + describe(view.activeTrack()));
+            assertFalse(notes.get(0).isRest());
+            assertTrue(notes.get(1).isRest(), "中间那条是休止符");
+            assertFalse(notes.get(2).isRest());
+            assertEquals(notes.get(0).endTick(), notes.get(1).startTick(), "休止符接在第一个音后面");
+            assertEquals(notes.get(1).endTick(), notes.get(2).startTick(), "第三个音接在休止符后面");
+        });
+    }
+
+    /** 小调用的是自然小调音阶：简谱 3 是 ♭3（A 小调的 3 = C）。 */
+    @Test
+    void minorKeysUseTheNaturalMinorScale() throws Exception {
+        withDocument((app, view, dispatcher) -> {
+            long[] now = { 0 };
+            view.setNanoClockForTesting(() -> now[0]);
+            SwingUtilities.invokeAndWait(() -> {
+                view.setKeySignature(9, true); // A 小调
+                view.setInputMode(true);
+            });
+            int octave = Math.floorDiv(view.inputCursorPitch(), 12);
+            now[0] = 0;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_PRESSED, KeyEvent.VK_NUMPAD3, 0));
+            assertEquals(octave * 12 + 9 + 3, view.inputCursorPitch(), "A 小调的 3 是 C（♭3）");
+            assertEquals("3", view.inputBadgeDegree(), "浮牌也按小调算");
+            now[0] = 240_000_000L;
+            dispatcher.dispatchKeyEvent(key(app, KeyEvent.KEY_RELEASED, KeyEvent.VK_NUMPAD3, 0));
+        });
+    }
+
+    /** 时间轴不是“有限的一段”：光标一路往右走，画布要跟着变长，不然会跑出可见区域。 */
+    @Test
+    void movingTheCursorFarRightKeepsTheTimelineGrowing() throws Exception {
+        withDocument((app, view, dispatcher) -> {
+            SwingUtilities.invokeAndWait(() -> {
+                var roll = view.pianoRoll();
+                roll.scrollPane().getViewport().setSize(1000, 700);
+                roll.canvas().setSize(6000, 800);
+                view.setInputMode(true);
+            });
+            int before = view.pianoRoll().canvas().getPreferredSize().width;
+
+            SwingUtilities.invokeAndWait(() -> {
+                for (int i = 0; i < 400; i++) {
+                    view.moveInputCursor(1, 0);
+                }
+            });
+
+            int after = view.pianoRoll().canvas().getPreferredSize().width;
+            int cursorX = view.pianoRoll().timeline()
+                    .xAtTick(view.inputCursorTick(), view.document().ppq());
+            assertTrue(after > before, "画布要跟着光标加长：" + before + " → " + after);
+            assertTrue(cursorX + 200 <= after, "光标右边还要留出滚动余量：x=" + cursorX + " 宽度 " + after);
         });
     }
 

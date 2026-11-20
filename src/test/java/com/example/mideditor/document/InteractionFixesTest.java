@@ -90,13 +90,13 @@ class InteractionFixesTest {
         try {
             Note longNote = new Note(60, 0, 960, 100);
             MidiDocumentView view = openDocument(app, holder, List.of(longNote));
+            long step = view.grid().resolution().ticksPerGrid(view.document().ppq());
             SwingUtilities.invokeAndWait(() -> {
-                view.setInputMode(true);
-                view.moveInputCursor(4, 0); // 光标走到 480
-                view.deleteInputStep(1); // Delete：删右边一格 [480, 600)
+                view.setInputMode(true); // 光标落在最后一个音的末尾（960）
+                view.moveInputCursor(-(int) (480 / step), 0); // 走到 480
+                view.deleteInputStep(1); // Delete：删右边一格 [480, 480+step)
             });
 
-            long step = view.grid().resolution().ticksPerGrid(view.document().ppq());
             List<Note> sounding = sounding(view.activeTrack());
             assertEquals(2, sounding.size(), "中间挖掉一格后应当拆成两段：" + describe(view.activeTrack()));
             assertEquals(0, sounding.get(0).startTick());
@@ -116,13 +116,12 @@ class InteractionFixesTest {
         try {
             Note note = new Note(60, 0, 480, 100);
             MidiDocumentView view = openDocument(app, holder, List.of(note));
+            long step = view.grid().resolution().ticksPerGrid(view.document().ppq());
             SwingUtilities.invokeAndWait(() -> {
-                view.setInputMode(true);
-                view.moveInputCursor(4, 0); // 光标在 480
-                view.deleteInputStep(-1); // Backspace：删左边一格 [360, 480)
+                view.setInputMode(true); // 光标落在最后一个音的末尾（480）
+                view.deleteInputStep(-1); // Backspace：删左边一格 [480-step, 480)
             });
 
-            long step = view.grid().resolution().ticksPerGrid(view.document().ppq());
             List<Note> sounding = sounding(view.activeTrack());
             assertEquals(1, sounding.size(), describe(view.activeTrack()));
             assertEquals(480 - step, sounding.get(0).endTick());

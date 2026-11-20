@@ -66,15 +66,10 @@ class ShortcutReworkTest {
             assertTrue(view.inputBeatSnap(), "第一下同时带节奏辅助");
 
             press(input);
-            assertTrue(view.inputMode(), "第二下：还在输入模式");
-            assertFalse(view.inputBeatSnap(), "但节奏辅助关掉");
+            assertFalse(view.inputMode(), "第二下：直接退出（没有“只有输入模式”的中间态）");
 
             press(input);
-            assertFalse(view.inputMode(), "第三下：退出输入模式");
-            assertFalse(view.inputBeatSnap());
-
-            press(input);
-            assertTrue(view.inputMode(), "第四下又从带辅助的那档开始");
+            assertTrue(view.inputMode(), "第三下：又带着辅助进回来");
             assertTrue(view.inputBeatSnap());
         } finally {
             SwingUtilities.invokeAndWait(() -> {

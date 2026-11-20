@@ -23,10 +23,21 @@ import com.example.mideditor.ui.theme.Theme;
 /** 子窗口底部传输条：播放控制 / BPM / 位置 / 网格 / 缩放。 */
 public final class TransportBar extends JPanel {
 
+    /** 12 个主音 × 大/小调，索引 = 主音 * 2 + (小调 ? 1 : 0)。 */
+    private static String[] keyNames() {
+        String[] names = new String[24];
+        for (int i = 0; i < 12; i++) {
+            names[i * 2] = com.example.mideditor.document.MidiDocument.keyName(i, false);
+            names[i * 2 + 1] = com.example.mideditor.document.MidiDocument.keyName(i, true);
+        }
+        return names;
+    }
+
     private final MidiDocumentView host;
     private final JButton playButton;
     private final JLabel positionLabel = new JLabel();
     private final JSpinner bpmSpinner;
+    private final JComboBox<String> keyBox;
     private final JComboBox<GridSettings.Resolution> gridBox;
     private final JSlider zoomSlider;
     private final JLabel pitchLabel = new JLabel("-");
@@ -80,7 +91,8 @@ public final class TransportBar extends JPanel {
             }
             host.setTempo(((Number) bpmSpinner.getValue()).doubleValue());
         });
-        // 焦点一离开就把“输了但没回车”的速度落地，否则用户看到的是改了却没生效
+        // 焦点一离开就把“输了但没回车”的速度落地，否则用户看到的是改了却没生效；
+        // 回车之后把焦点还给频谱，输入模式下可以马上接着敲音
         if (bpmSpinner.getEditor() instanceof JSpinner.DefaultEditor editor) {
             editor.getTextField().addFocusListener(new java.awt.event.FocusAdapter() {
                 @Override
@@ -88,8 +100,31 @@ public final class TransportBar extends JPanel {
                     commitBpmEdit();
                 }
             });
+            editor.getTextField().addActionListener(e -> {
+                commitBpmEdit();
+                host.focusSpectrum();
+            });
         }
         add(bpmSpinner);
+
+        // 调号：小键盘简谱的 1 落在哪个音上（浮牌右格也跟着它变）
+        add(label("调"));
+        keyBox = new JComboBox<>(keyNames());
+        keyBox.setFont(Theme.SMALL_FONT);
+        keyBox.setPreferredSize(new java.awt.Dimension(64, 22));
+        keyBox.setMaximumRowCount(24);
+        keyBox.setToolTipText("调号（无 m = 大调，带 m = 小调）");
+        keyBox.setSelectedIndex(host.document().keyTonic() * 2 + (host.document().keyMinor() ? 1 : 0));
+        keyBox.addActionListener(e -> {
+            if (updating || keyBox.getSelectedIndex() < 0) {
+                return;
+            }
+            int index = keyBox.getSelectedIndex();
+            host.setKeySignature(index / 2, index % 2 == 1);
+            // 选完把焦点还给频谱：否则输入模式下所有键都被这个下拉框吃住，必须再点一下频谱才能继续
+            host.focusSpectrum();
+        });
+        add(keyBox);
 
         add(separator());
         add(label("网格"));
@@ -104,6 +139,7 @@ public final class TransportBar extends JPanel {
             host.grid().setResolution((GridSettings.Resolution) gridBox.getSelectedItem());
             host.pianoRoll().repaint();
             host.app().refreshCommandStates();
+            host.focusSpectrum();
         });
         add(gridBox);
 
@@ -117,7 +153,10 @@ public final class TransportBar extends JPanel {
                 return;
             }
             host.pianoRoll().timeline().setZoom(zoomSlider.getValue() / 100.0);
-            host.app().refreshCommandStates();
+            // 拖拽过程中不要再逐像素刷命令态/面板（那是“卡卡的”的来源），松手时补一次
+            if (!zoomSlider.getValueIsAdjusting()) {
+                host.app().refreshApplicationState();
+            }
         });
         add(zoomSlider);
 
@@ -203,6 +242,7 @@ public final class TransportBar extends JPanel {
             long micros = host.document().tempoMap().microsAtTick(tick);
             positionLabel.setText("tick " + tick + " · " + StatusBar.formatMicros(micros));
             bpmSpinner.setValue((int) Math.round(host.document().tempoMap().bpmAt(0)));
+            keyBox.setSelectedIndex(host.document().keyTonic() * 2 + (host.document().keyMinor() ? 1 : 0));
             gridBox.setSelectedItem(host.grid().resolution());
             zoomSlider.setValue((int) Math.round(host.pianoRoll().timeline().zoom() * 100));
             var track = host.activeTrack();

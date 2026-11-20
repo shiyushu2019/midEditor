@@ -227,7 +227,7 @@ public interface DocumentEdit { String label(); void undo(); void redo(); boolea
 - **关键：时值吸附网格，但起点绝不由「敲击间隔」推导**。v1.15/v1.16 曾经按两次按键的间隔生成休止符（`glueToPreviousInput` / `alignWithPreviousInput`），已被 v1.17 整体推翻：现在 `endInputNote` 只做两件事——起点取按下时的光标（光标本来就在上一条末尾，于是天然首尾相接；只有手动 A/D 挪开过才 `snapTickToAssistUnit`），时值 `snapDurationToAssistUnit` 吸附到整数格。**输入模式永远不会因为间隔而插休止符**。
 - **小键盘数字输入（v1.22）**：`beginInputDegreeNote(degree)` 把光标切到「当前八度 C + C 大调音阶第 degree 级」（`DEGREE_SEMITONES = {0,2,4,5,7,9,11}`），然后直接复用 `beginInputNote(pitch, sourceKey)` —— 按下即开始计时、松手即 `endInputNote`，和空格完全同一条收尾路径。
   - **八度偏移 `inputOctaveJump`**：小键盘 `+` / `-`（`VK_ADD` / `VK_SUBTRACT`）±1，夹在 ±9；取音高时用的是「光标当前八度 + jump」。**每输入完一个音就归零**（在 `endInputNote` / `abortInputNote` 里清），不留给下一条。`degreePitch()` 是纯函数（static，包内可见），测试直接断言音高。
-  - **按住大键盘 `+`/`=` 或 `-`/`_`（v1.22 补充）**：`inputOctaveHold` 记 ±1（松开回 0），它是<b>物理按键状态</b>，所以按住期间连敲多个数字都有效；取音高时参与 `shift = inputOctaveJump + inputOctaveHold * octaveScale`，`octaveScale` 由按键事件里是否带 Ctrl 决定（1 或 2）——所以 `Ctrl + = + 数字` = 高两个八度，`Ctrl + - + 数字` = 低两个八度。`InputModeDispatcher` 的修饰键放行条件也因此从“任何 Ctrl 都放行给命令系统”改成“Alt/Meta 一律放过，Ctrl 只放行小键盘 1~7 与 `VK_EQUALS`/`VK_MINUS`”（`Ctrl+Space` 停止等仍归命令系统）。
+  - **按住大键盘 `+`/`=` 或 `-`/`_`（v1.22 补充，v1.25 改为一次性）**：`inputOctaveHold` 记 ±1（用完即清），它是<b>物理按键状态</b>，所以按住期间连敲多个数字都有效；取音高时参与 `shift = inputOctaveJump + inputOctaveHold * octaveScale`，`octaveScale` 由按键事件里是否带 Ctrl 决定（1 或 2）——所以 `Ctrl + = + 数字` = 高两个八度，`Ctrl + - + 数字` = 低两个八度。`InputModeDispatcher` 的修饰键放行条件也因此从“任何 Ctrl 都放行给命令系统”改成“Alt/Meta 一律放过，Ctrl 只放行小键盘 1~7 与 `VK_EQUALS`/`VK_MINUS`”（`Ctrl+Space` 停止等仍归命令系统）。
   - **Ctrl+U / Ctrl+L = 光标整八度**：`moveInputCursor(0, ±12)`，只挪光标（音高窗口跟着翻），不出音符、不动时间；只认「纯 Ctrl+U/L」（`SHIFT_DOWN_MASK` 不算），所以 `Ctrl+Shift+L`（循环域＝选区）仍归命令系统。注意 `Ctrl+L` 本身是「循环播放」的快捷键，输入模式下会先被 `InputModeDispatcher` 吃掉。
   - **刚输入的那条就是选中项**：`endInputNote` 末尾 `selection().setSingle(created)`——只换选中、不累加，也不影响 Esc 退出 / Esc 取消选中 / 删完选邻居这些既有规则（`DocumentSelection` 按 id 存，撤销后旧 id 解析为空自然失效）。
   - **空格与小键盘互不打断**：`inputNoteKey` 记下这条音是哪个键按下的，松手走 `endInputNoteFromKey(keyCode)`，键对不上就不收尾（两套输入并存时不会互相提前结束）。
@@ -660,3 +660,54 @@ rewind()（F6 / ⏮ 按钮）与 stopTransport()（F4 / ⏹ 按钮，它本来�
 3. **粘贴只跟随点击位置的时间，不再平移音高**：`paste()` 去掉 `pasteAnchorPitch - items.get(0).pitch()` 的整体移调，`setPasteAnchor(long tick)` 也不再带音高参数。
 
 回归：`TextFocusGuardTest.functionKeysAreNeverTreatedAsTyping`（F5/F4/F6 不挡、空格与 Delete 仍挡）、`BpmTempoTest.tempoTypedButNotCommittedIsAppliedBeforePlayback`（输入 90 不回车直接播放 → `tempoMap.bpmAt(0) == 90`）、`InputModeTest.enteringInputModePutsTheCursorInTheMiddleOfTheVisibleSpectrum`（滚到 900 与 3000 后再进都落在新视口中点，纵向是泳道中间行）、`InteractionFixesTest.pasteLandsWhereYouLastClicked`（落点 960、音高仍是 60）。测试总计 **160 项**。
+
+### v1.25 大键盘 +/− 的八度偏移改成“一次性”
+
+- 用户要求：`大键盘 −` + `小键盘 7` 写出低音 7 之后，**下一个音自动回到原来的八度**，不需要再按 `+` 扳回来；小键盘 `+ / −` 那套（可累积、输完一个音才归零的 `inputOctaveJump`）保持原样。
+- 实现：`inputOctaveHold` 从“物理按键状态”改成“**一次性令牌**”——`beginInputDegreeNote` 里算完 `shift` 就把它清掉；另加 `inputOctaveHoldKey` 记住是哪个键挂上的，用来**吃掉键盘自动重复**（按住不放产生的连续 KEY_PRESSED 不会把令牌重新挂上，只有真正松开再按才算）。`pressInputOctaveHold(direction, keyCode)` / `releaseInputOctaveHold(keyCode)` 取代原来的 `setInputOctaveHold(int)`。Ctrl 的双八度仍然按“按下的那一刻有没有 Ctrl”算（`octaveScale`）。
+- 回归：`InputModeTest.holdingMainKeyboardPlusMinusShiftsTheNumpadOctave` 覆写成一次性语义（`=`+1 → 下一个数字回原八度；自动重复不重挂；松开再按才生效；Ctrl 双八度也只一次；小键盘 `+` 仍可累积到 +2 八度）。
+- **第一次改完仍然复现（用户实测「低音 7 之后还是继续在低音区」）**：因为音高是拿**光标所在八度**当基准算的，而输入完光标就停在那个低音上 → 下一个数字又从低八度出发，令牌清没清都无所谓。真正的修法是把基准八度**独立出来**：新增 `inputDegreeOctave`，只在「进入输入模式（取可见中心）」和「手动改音高（W/S、Ctrl+U/L）」时更新；`beginInputDegreeNote` 用 `base + jump + temp` 算音高，然后 `inputDegreeOctave = base + jump`（小键盘 jump 照旧保留，`temp` 不写进基准）。A/D 只挪时间、不改音高，因此也不会把基准拖走。
+- 回归补充：同一条测试里加了用户原始场景——`-` + 小键盘 `7` → 低八度 si（`base-1`），紧接着再敲 `7` → 回到 `base+11`（原八度的 si）。
+
+### v1.26 入场接最后一条 / Ctrl+I 两态 / 调号属性 / 输入浮牌
+
+1. **进入输入模式的光标位置**：`setInputMode(true)` 先找活动音轨上最后一个发声的平行线（`lastSoundingNote`），光标放到它的 `endTick`、音高取它；**一个音都没有时落在 tick 0 的 C 上**（`nearestC(可见窗口中间行)`，默认音域中央就是 C4），频谱也拉回开头。
+2. **Ctrl+I 两态**：`EDIT_INPUT_MODE` 的处理器从三态循环改成「关 ⇄ 输入模式＋节奏辅助」，开的时候强制 `setInputBeatSnap(true)`。
+3. **调号**：`MidiDocument.keyTonic()` / `setKeyTonic()`（主音音级 0..11，默认 C），UI 在**传输条 BPM 右边**的「调」下拉框（`TransportBar.keyBox` → `MidiDocumentView.setKeySignature()`，走 `pushEdit` 可撤销）；小键盘简谱（`degreePitch(degree, octave, tonic)`）与浮牌数字（`degreeLabel(tonic, pitch)`）都按它算。持久化：非 C 调时往指挥轨写一条 `mideditor:key=<tonic>` 的 marker text meta，读盘时 `readKeySignature()` 捡回来，`collectForeignMeta` 不再把它当外来 meta 存一遍。
+4. **输入浮牌**：按住空格 / Q / 小键盘数字时，在**按下那一刻**的光标位置（`inputBadgeTick/Pitch`）旁边画一个 2a × a 的小矩形（a = 20px，中间一条竖线分成两个正方形）：左格 `scientificPitchName()`（MIDI 60 = C4，与左侧键盘标尺一致），右格 `degreeLabel()`。松手后 `inputBadgeHeld = false` 并记下 `hideAt = now + 1s`，由 60 Hz 的 `onUiTick` 到点清状态并重绘一次（牌子随之消失）；牌子靠近视口边缘时会夹回可见区域内。绘制在 `PianoRollPainter.paintInputBadge`，颜色 `Theme.INPUT_BADGE_*`。
+   - 状态机可注入时钟（`setNanoClockForTesting`），测试直接断言「按住显示 / 0.9 秒还在 / 1.4 秒没了」。
+
+回归：`InputModeTest.enteringInputModePutsTheCursorAfterTheLastNote`、`enteringInputModeWithNoNotesPutsTheCursorAtTheStart`（空文档 → tick 0 且落在 C、视图拉回开头）、`ctrlITogglesInputModeWithBeatSnapInTwoStates`、`keySignatureIsPerDocumentAndDrivesTheDegrees`、`pitchBadgeShowsWhileHoldingAndLingersOneSecond`、`pitchBadgeIsPainted`（离屏 paint 后图像里能找到 `INPUT_BADGE_BORDER` 像素）、`BpmTempoTest.keySignatureComboSetsTheKeyAndItSurvivesSaving`（下拉框 → 文档 → 存盘读回），以及按新语义改写的 `ShortcutReworkTest`（Ctrl+I 两态）与 `InteractionFixesTest` 两条按格删除（入场现在停在最后一个音末尾，测试改成显式把光标挪回 480）。测试总计 **166 项**。
+
+### v1.28 小键盘 0 = 休止符 + 编辑菜单「一键移调」
+
+1. **小键盘 0 输入休止符**：`InputModeDispatcher` 的 `VK_NUMPAD0` → `beginInputRestNote()`，走同一条 `beginInputNote(pitch, sourceKey, rest)` / `endInputNote` 路径，只是落地时用 `Note.rest(pitch, start, duration)`、不发声、不做“上一条裁剪”，浮牌右格写 **0**（简谱的 0 就是休止符）。按住多久就留多长的空；因为休止符在这个模型里就是空隙，夹在两个音之间会立刻被 `reconcileRests` 实体化成红线（时长以空隙为准），写在最后一个音后面时只是把光标往后推，等后面再接上音就成了休止符。
+2. **编辑 → 一键移调…**（`EDIT_TRANSPOSE`，无快捷键）：对话框只有一个「半音数」spinner（-24…24）+ 实时预览「调号：C → D」；确定后 `MidiDocumentView.transposeAll(semitones)` —— 所有发声平行线的音高按 id 记下前后值，用 `SimpleEdit`（**绝对值**的 redo/undo）一次提交，所以撤销/重做不会叠加；调号按 `(old + shift) mod 12` 一起转（`MidiDocument.keyName()` 供下拉框与对话框共用）。休止符不平移（它们会随空隙重算），音高夹在 0..127。
+
+回归：`InputModeTest.numpadZeroEntersARest`（1 → 0 → 5 得到「音·休止·音」且首尾相接、浮牌写 0）、`TransposeTest` 3 项（平移 + 调号 + 撤销/重做、越界夹取、0 半音不产生空编辑）。测试总计 **170 项**。
+
+### v1.29 大小调 + 改完运输条控件把焦点还给频谱
+
+1. **调性支持小调**：`MidiDocument.keyMinor()`（false 大调 / true 自然小调）+ `keyName(tonic, minor)`（"C"/"Cm"）。小键盘简谱按调式取音（`DEGREE_SEMITONES_MAJOR = {0,2,4,5,7,9,11}` / `DEGREE_SEMITONES_MINOR = {0,2,3,5,7,8,10}`），浮牌 `degreeLabel(tonic, minor, pitch)` 同理；传输条的调号下拉框变成 **24 项**（索引 = 主音×2 + 小调?1:0）；持久化标记变成 `mideditor:key=7m` 这种，读盘时按结尾的 `m` 认小调。
+2. **移调能改大小调**：对话框多了「调式：保持 / 大调 / 小调」，`transposeAll(semitones, Boolean minor)`（null = 保持），预览显示 `C → D`、`C → Am`；撤销/重做同时恢复音高、主音与调式。
+3. **改完运输条控件焦点自动回频谱**（用户报“改完调必须再点一下频谱才能继续输入”）：根因是 `JComboBox` 拿到焦点时 `TextFocusGuard.isTextEditing()` 为真，输入模式的键全被挡住。修法：调号 / 网格下拉框选完后 `host.focusSpectrum()`；BPM 框按**回车**提交后同样把焦点还回去（失焦提交那条路径不变）。`MidiDocumentView.focusSpectrum()` 就是 `pianoRoll.canvas().requestFocusInWindow()`。
+
+回归：`InputModeTest.minorKeysUseTheNaturalMinorScale`（A 小调 3 = C，浮牌写 3）、`TransposeTest.transposingCanSwitchBetweenMajorAndMinor`（0 半音只改调式、撤销能退）、`BpmTempoTest.keySignatureComboSetsTheKeyAndItSurvivesSaving` 扩成 24 项下拉框 + G 大调/G 小调存盘读回。测试总计 **172 项**。
+
+### v1.30 时间轴自动加长 + 缩放不再整套重排
+
+1. **时间轴原来是有限的**：`PianoRollView.relayout` 只按「内容末尾 + 16 拍，最少 64 拍」算画布宽度，输入模式把光标一路往右推，过了那个宽度 `scrollToTick` 就滚不动了，光标直接跑出可见区域。修法：
+   - `contentEndTick()` 把 `document.endTick()` / `inputCursorTick()` / `playheadTick()` 三者取最大再 +16 拍；
+   - 新增 `ensureWidthFor(tick)`，在 `scrollToTick` 开头调用——不够就加宽到「tick 的 x + 一屏余量（至少 800px）」，所以光标 / 播放头 / 选区跟随都能源源不断地往右展开。
+2. **缩放“卡卡的”**：原来每次 `timeline` 变化都走 `onTimelineChanged → relayout(false)`——重建行头、重设四块组件尺寸、`scroll.revalidate()` 全树重排；滚轮一格一次，肉眼就是一顿一顿。现在缩放只调 `applyTimeWidth()`（改画布 + 标尺宽度）再重画这两块；另外 Alt+滚轮不再调 `refreshApplicationState()`（整应用刷面板），只同步传输条；传输条缩放滑块拖拽中不刷命令态，松手才刷一次。
+
+回归：`InputModeTest.movingTheCursorFarRightKeepsTheTimelineGrowing`（向右走 400 格后画布变宽、光标右侧仍有余量）；全量 173 项在无布局环境下全绿。
+
+### v1.31 光标换到新音也亮浮牌
+
+1. 浮牌（音名 + 简谱数字的 2:1 小矩形）原来只在「按住 空格 / Q / 小键盘数字」时出现，靠 `beginInputNote` 里的 `showInputBadge` + `endInputNote` 里的 `lingerInputBadge` 驱动；在 `moveCursorTo` 里换成静音键看音高时完全没有反馈。
+   现在把浮牌当成通用的「音高反馈」：`moveCursorTo(tick, pitch)` 先比较新旧音高，`newPitch && inputMode && !inputNoteHeld` 就 `showInputBadge(pitch, tick)` + `lingerInputBadge()`（沿用同一个 `INPUT_BADGE_LINGER_NANOS = 1s`）。用 `inputNoteHeld` 挡住按住期间的重叠——不然 WASD 挪光标会把手上那条音的浮牌顶掉。
+2. `setInputMode(true)` 末尾也补一次 `showInputBadge` + `lingerInputBadge`：进场就告诉用户光标停在哪个音上。
+3. 顺带删掉 `degreeLabel(int, int)`（两参重载）：大小调重构后只留 `degreeLabel(tonic, minor, pitch)`，两参版本已成死代码。
+
+回归：`InputModeTest.pitchBadgeShowsWhileHoldingAndLingersOneSecond`（按新入场行为改写时间点：进场即亮、1 秒后灭）、`InputModeTest.switchingToOneNoteLightsThePitchBadgeForASecond`（W → 亮且音高 +1、写 C#4；0.5 秒仍亮、1 秒后灭；D 键 D 音不亮牌；Ctrl+U → 亮、+13、写 C#5）；全量 **174 项**全绿。

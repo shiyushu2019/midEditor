@@ -91,10 +91,34 @@ public final class MidiDocumentView extends DocumentView {
     private boolean inputBeatSnap;
     /** 小键盘 +/- 累计的八度偏移：数字键按「光标当前八度 + jump」取音高，输完一个音就归零。 */
     private int inputOctaveJump;
-    /** 大键盘 +/=（+1）或 -/_（-1）当前是否按着：按住时小键盘数字整体高/低一个八度，0 = 没按。 */
+    /** 大键盘 +/=（+1）或 -/_（-1）挂上的临时八度偏移：只作用于紧接着按下的那一个数字，0 = 没有。 */
     private int inputOctaveHold;
+    /** 挂上这个临时偏移的物理键（用来吃掉键盘自动重复，0 = 没按）。 */
+    private int inputOctaveHoldKey;
+    /**
+     * 小键盘数字用的基准八度（不含大键盘 +/- 的临时偏移）。
+     *
+     * <p>
+     * 不能“算一个音就跟着光标走”：光标会停到那个音上，低音写完之后光标就在低八度里，
+     * 下一个数字又变成低音。所以只在这里显式记录（入场 / 手动挪光标 / 小键盘 jump 生效时），
+     * 大键盘 +/- 的临时偏移不写进来。 -1 = 还没定。
+     * </p>
+     */
+    private int inputDegreeOctave = -1;
+
+    /** 按住输入时那块小牌松手后再停留多久。 */
+    private static final long INPUT_BADGE_LINGER_NANOS = 1_000_000_000L;
+    /** 「音名 + 简谱数字」浮牌：按着时一直显示，松手后延迟一会儿才消失。 */
+    private boolean inputBadgeHeld;
+    private int inputBadgePitch = -1;
+    private long inputBadgeTick;
+    private long inputBadgeHideAtNanos;
+    /** 浮牌当前显示的是不是休止符（右格写 0）。 */
+    private boolean inputBadgeRest;
     /** 正在输入的这条音由哪个键按下（空格 / 小键盘数字），松手时只认这个键；0 = 不限制。 */
     private int inputNoteKey;
+    /** 正在输入的这条是休止符（小键盘 0）。 */
+    private boolean inputNoteIsRest;
     /** 可注入的时钟（测试用来精确控制“按了多久 / 隔了多久”）。 */
     private java.util.function.LongSupplier nanoClock = System::nanoTime;
 
@@ -309,8 +333,13 @@ public final class MidiDocumentView extends DocumentView {
     }
 
     private void onUiTick() {
-        // 输入模式：按着空格时把“正在输入”的幽灵条逐帧刷出来（长度 = 已按住的真实时长）
-        if (inputMode && inputNoteHeld) {
+        // 输入模式：按着输入时把“正在输入”的幽灵条逐帧刷出来（长度 = 已按住的真实时长）；
+        // 音名 / 简谱浮牌也是这时限到的——到点先清掉状态，这一帧就把牌子抹掉
+        if (inputMode && (inputNoteHeld || inputBadgePitch >= 0)) {
+            if (inputBadgePitch >= 0 && !inputBadgeHeld
+                    && nanoClock.getAsLong() >= inputBadgeHideAtNanos) {
+                inputBadgePitch = -1;
+            }
             pianoRoll.canvas().repaint();
         }
         PlaybackEngine engine = app().playback();
@@ -399,25 +428,34 @@ public final class MidiDocumentView extends DocumentView {
         // 八度偏移只在这一次输入模式里有效，不跨会话保留
         inputOctaveJump = 0;
         inputOctaveHold = 0;
+        inputOctaveHoldKey = 0;
+        inputDegreeOctave = -1;
         if (on) {
-            // 光标放到当前可见频谱的正中间：横向取视口中点换算成 tick（吸附网格），
-            // 纵向取活动音轨泳道的中间行（音域窗口正好铺满泳道，所以它就是“看到的那一段的中间”）
-            java.awt.Rectangle visible = pianoRoll.visibleRect();
-            Track track = activeTrack;
-            int lane = track == null ? -1 : document().tracks().indexOf(track);
-            long centerTick = visible.width > 0
-                    ? pianoRoll.timeline().tickAtX(visible.x + visible.width / 2, document().ppq())
-                    : playheadTick;
-            int centerPitch = inputCursorPitch;
-            if (track != null && lane >= 0 && visible.height > 0) {
-                centerPitch = pianoRoll.pitchAt(track, lane,
-                        pianoRoll.laneTop(lane) + pianoRoll.laneHeight() / 2);
+            // 光标接在最后一个音后面（音高也取它）；一个音都没有就回到时间轴最左边
+            Note last = lastSoundingNote(activeTrack);
+            if (last != null) {
+                inputCursorTick = Math.max(0, last.endTick());
+                inputCursorPitch = last.pitch();
+            } else {
+                // 空文档：tick 0 + 落在 C 上（取可见窗口中间那行最近的 C，默认就是 C4）
+                java.awt.Rectangle visible = pianoRoll.visibleRect();
+                Track track = activeTrack;
+                int lane = track == null ? -1 : document().tracks().indexOf(track);
+                int centerPitch = inputCursorPitch;
+                if (track != null && lane >= 0 && visible.height > 0) {
+                    centerPitch = pianoRoll.pitchAt(track, lane,
+                            pianoRoll.laneTop(lane) + pianoRoll.laneHeight() / 2);
+                }
+                inputCursorTick = 0;
+                inputCursorPitch = nearestC(centerPitch);
             }
-            inputCursorTick = Math.max(0, grid.snap(centerTick, document().ppq()));
-            inputCursorPitch = Math.max(0, Math.min(127, centerPitch));
+            inputDegreeOctave = octaveOf(inputCursorPitch);
             // 光标不在可见音域里就把频谱翻过去，而不是把光标“按”在边上
             scrollPitchWindowToCursor(activeTrack);
             pianoRoll.scrollToTick(inputCursorTick);
+            // 刚进场也给一次“音名 + 简谱数字”的提示（1 秒后自己消失）
+            showInputBadge(inputCursorPitch, inputCursorTick, false);
+            lingerInputBadge();
         }
         pianoRoll.canvas().repaint();
         app().refreshApplicationState();
@@ -425,6 +463,99 @@ public final class MidiDocumentView extends DocumentView {
 
     public long inputCursorTick() {
         return inputCursorTick;
+    }
+
+    /** 输入模式里活动音轨上最后一个发声的平行线（没有就返回 null）。 */
+    private Note lastSoundingNote(Track track) {
+        if (track == null) {
+            return null;
+        }
+        List<Note> notes = track.notes();
+        for (int i = notes.size() - 1; i >= 0; i--) {
+            Note note = notes.get(i);
+            if (!note.isRest()) {
+                return note;
+            }
+        }
+        return null;
+    }
+
+    // ------------------------------------------------- 音名 / 简谱数字浮牌
+
+    /** 浮牌现在该不该画（按着时一直显示，松手后再停留 1 秒）。 */
+    public boolean inputBadgeVisible() {
+        if (inputBadgePitch < 0) {
+            return false;
+        }
+        return inputBadgeHeld || nanoClock.getAsLong() < inputBadgeHideAtNanos;
+    }
+
+    public int inputBadgePitch() {
+        return inputBadgePitch;
+    }
+
+    /** 牌子贴在按下之前的光标位置（而不是松手后的位置）。 */
+    public long inputBadgeTick() {
+        return inputBadgeTick;
+    }
+
+    /** 左格：科学记音法（如 C4）。 */
+    public String inputBadgePitchName() {
+        return scientificPitchName(inputBadgePitch);
+    }
+
+    /** 右格：当前调下的简谱数字（休止符写 0；不在音阶上时给 #数字 / ?）。 */
+    public String inputBadgeDegree() {
+        return inputBadgeRest ? "0"
+                : degreeLabel(document().keyTonic(), document().keyMinor(), inputBadgePitch);
+    }
+
+    private static final String[] PITCH_NAMES = {
+            "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+
+    /** 科学记音法：MIDI 60 = C4（与左侧键盘标尺的八度标注一致）。 */
+    static String scientificPitchName(int pitch) {
+        int p = Math.max(0, Math.min(127, pitch));
+        return PITCH_NAMES[p % 12] + (p / 12 - 1);
+    }
+
+    /** 当前调下这个音高是简谱第几级（1..7）；不在音阶上时给 #数字，再不行给 ?。 */
+    static String degreeLabel(int tonic, boolean minor, int pitch) {
+        int[] scale = minor ? DEGREE_SEMITONES_MINOR : DEGREE_SEMITONES_MAJOR;
+        int p = Math.max(0, Math.min(127, pitch));
+        int rel = Math.floorMod(p - Math.floorMod(tonic, 12), 12);
+        for (int d = 0; d < 7; d++) {
+            if (scale[d] == rel) {
+                return String.valueOf(d + 1);
+            }
+        }
+        for (int d = 0; d < 7; d++) {
+            if (scale[d] == rel - 1) {
+                return "#" + (d + 1);
+            }
+        }
+        return "?";
+    }
+
+    private void showInputBadge(int pitch, long tick) {
+        showInputBadge(pitch, tick, false);
+    }
+
+    private void showInputBadge(int pitch, long tick, boolean rest) {
+        inputBadgeHeld = true;
+        inputBadgePitch = Math.max(0, Math.min(127, pitch));
+        inputBadgeTick = Math.max(0, tick);
+        inputBadgeRest = rest;
+        inputBadgeHideAtNanos = 0;
+    }
+
+    /** 松手：牌子再停留 1 秒（由 {@code onUiTick} 负责到点清掉并重绘）。 */
+    private void lingerInputBadge() {
+        if (!inputBadgeHeld) {
+            return;
+        }
+        inputBadgeHeld = false;
+        inputBadgeHideAtNanos = nanoClock.getAsLong() + INPUT_BADGE_LINGER_NANOS;
     }
 
     public int inputCursorPitch() {
@@ -442,7 +573,12 @@ public final class MidiDocumentView extends DocumentView {
         }
         // 手动挪光标 = 断开与上一条的接续（之后按下的音从新位置开始）
         lastInputNoteId = null;
+        int before = inputCursorPitch;
         moveCursorTo(inputCursorTick + tickSteps * gridStepTicks(), inputCursorPitch + pitchSteps);
+        // 只有真的改了音高才重新定基准八度：A/D 只是左右挪时间，不该把“低音 7”的八度带下去
+        if (inputCursorPitch != before) {
+            inputDegreeOctave = octaveOf(inputCursorPitch);
+        }
     }
 
     // ------------------------------------------------ 小键盘数字输入（简谱）
@@ -454,7 +590,10 @@ public final class MidiDocumentView extends DocumentView {
      */
 
     /** 简谱 1..7（C 大调）相对所在八度 C 的半音数。 */
-    private static final int[] DEGREE_SEMITONES = { 0, 2, 4, 5, 7, 9, 11 };
+    /** 大调音阶相对主音的半音数（1=do … 7=si）。 */
+    private static final int[] DEGREE_SEMITONES_MAJOR = { 0, 2, 4, 5, 7, 9, 11 };
+    /** 自然小调音阶相对主音的半音数（1 2 ♭3 4 5 ♭6 ♭7）。 */
+    private static final int[] DEGREE_SEMITONES_MINOR = { 0, 2, 3, 5, 7, 8, 10 };
 
     /** 小键盘 + / -：八度偏移 ±1（夹在 ±9），只影响接下来按下的数字，输完一个音就归零。 */
     public void shiftInputOctaveJump(int steps) {
@@ -471,19 +610,39 @@ public final class MidiDocumentView extends DocumentView {
     }
 
     /**
-     * 大键盘 +/= 按下（+1）/ -/_ 按下（-1）/ 松开（0）—— <b>按住</b>时接下来按下的数字整体高/低八度；
-     * 因为它是物理按键状态，所以按住期间连敲多个数字都有效，松开就失效。
+     * 大键盘 +/= 按下（+1）/ -/_ 按下（-1）：给<b>紧接着的那一个</b>小键盘数字挂上 ±1 八度——
+     * 用完就撤（{@code beginInputDegreeNote} 里清），下一个音自动回到原来的八度，不用再按反方向键回来。
+     *
+     * <p>
+     * 自动重复（按住不放产生的连续 KEY_PRESSED）不算新的一次：只记第一次按下时的键码，
+     * 所以“按住 - 敲 7，再敲 7”只有第一个 7 是低音。
+     * </p>
      */
-    public void setInputOctaveHold(int direction) {
-        int normalized = Integer.signum(direction);
-        if (inputOctaveHold == normalized) {
+    public void pressInputOctaveHold(int direction, int keyCode) {
+        if (!inputMode || direction == 0) {
             return;
         }
-        inputOctaveHold = normalized;
+        if (inputOctaveHoldKey == keyCode) {
+            return; // 自动重复
+        }
+        inputOctaveHoldKey = keyCode;
+        inputOctaveHold = Integer.signum(direction);
         pianoRoll.canvas().repaint();
     }
 
-    /** 大键盘 +/- 当前挂着的八度方向（0 = 没按）。 */
+    /** 松开大键盘 +/-：把还没用掉的那次临时偏移撤掉。 */
+    public void releaseInputOctaveHold(int keyCode) {
+        if (inputOctaveHoldKey != 0 && inputOctaveHoldKey != keyCode) {
+            return; // 松开的是另一个键
+        }
+        inputOctaveHoldKey = 0;
+        if (inputOctaveHold != 0) {
+            inputOctaveHold = 0;
+            pianoRoll.canvas().repaint();
+        }
+    }
+
+    /** 当前挂着的临时八度方向（0 = 没有）。 */
     public int inputOctaveHold() {
         return inputOctaveHold;
     }
@@ -509,17 +668,51 @@ public final class MidiDocumentView extends DocumentView {
         if (!inputMode || degree < 1 || degree > 7 || inputNoteHeld) {
             return;
         }
-        int shift = inputOctaveJump + inputOctaveHold * Math.max(1, octaveScale);
-        beginInputNote(degreePitch(degree, inputCursorPitch, shift),
-                KeyEvent.VK_NUMPAD0 + degree);
+        int base = inputDegreeOctave >= 0 ? inputDegreeOctave : octaveOf(inputCursorPitch);
+        int jump = inputOctaveJump;
+        // 大键盘 +/- 的偏移是临时的：用完就撤，下一个音回到原来的八度
+        int temp = inputOctaveHold * Math.max(1, octaveScale);
+        inputOctaveHold = 0;
+        // 小键盘 jump 则留进基准（和原来一样：抬高之后继续在那儿写）；已折进基准，不再重复叠
+        inputDegreeOctave = base + jump;
+        inputOctaveJump = 0;
+        beginInputNote(degreePitch(degree, base + jump + temp, document().keyTonic(),
+                document().keyMinor()), KeyEvent.VK_NUMPAD0 + degree);
     }
 
-    /** 以 referencePitch 所在八度为基准，取简谱 degree（1..7）对应的 MIDI 音高。 */
-    static int degreePitch(int degree, int referencePitch, int octaveJump) {
+    /** 简谱 degree（1..7）在指定八度、指定调（主音音级 + 大/小调）上的 MIDI 音高。 */
+    static int degreePitch(int degree, int octave, int tonic, boolean minor) {
+        int[] scale = minor ? DEGREE_SEMITONES_MINOR : DEGREE_SEMITONES_MAJOR;
         int safeDegree = Math.max(1, Math.min(7, degree));
-        int octave = Math.floorDiv(Math.max(0, Math.min(127, referencePitch)), 12) + octaveJump;
-        int pitch = octave * 12 + DEGREE_SEMITONES[safeDegree - 1];
+        int pitch = octave * 12 + Math.floorMod(tonic, 12) + scale[safeDegree - 1];
         return Math.max(0, Math.min(127, pitch));
+    }
+
+    /**
+     * 小键盘 0：输入休止符（简谱的 0）。按住多久就留多长的空，光标跟着往前走。
+     *
+     * <p>
+     * 休止符在这个模型里就是「空隙」：写两条音中间的那段会立刻实体化成红线；写在最后一个音
+     * 后面时先只是把光标往后推，等后面再接上音，那段空隙就成休止符。
+     * </p>
+     */
+    public void beginInputRestNote() {
+        if (!inputMode || inputNoteHeld) {
+            return;
+        }
+        beginInputNote(inputCursorPitch, KeyEvent.VK_NUMPAD0, true);
+    }
+
+    /** 音高所在的八度（C 为界，与 {@link #degreePitch(int, int, int, boolean)} 互逆）。 */
+    static int octaveOf(int pitch) {
+        return Math.floorDiv(Math.max(0, Math.min(127, pitch)), 12);
+    }
+
+    /** 离这个音高最近的 C（0/12/24…120）；空文档里开输入模式时光标就落在 C 上。 */
+    static int nearestC(int pitch) {
+        int p = Math.max(0, Math.min(127, pitch));
+        int c = Math.round(p / 12f) * 12;
+        return Math.max(0, Math.min(120, c));
     }
 
     /**
@@ -576,10 +769,17 @@ public final class MidiDocumentView extends DocumentView {
 
     /** 把光标放到指定位置（tick 夹 ≥ 0；音高占 0..127，走出可见音域时把频谱翻过去）。 */
     private void moveCursorTo(long tick, int pitch) {
+        int target = Math.max(0, Math.min(127, pitch));
+        boolean newPitch = target != inputCursorPitch;
         inputCursorTick = Math.max(0, tick);
-        inputCursorPitch = Math.max(0, Math.min(127, pitch));
+        inputCursorPitch = target;
         scrollPitchWindowToCursor(activeTrack);
         pianoRoll.scrollToTick(inputCursorTick);
+        // 光标换到一个新音（W/S、Ctrl+U/L…）：把“音名 + 简谱数字”的牌子亮 1 秒
+        if (inputMode && newPitch && !inputNoteHeld) {
+            showInputBadge(target, inputCursorTick, false);
+            lingerInputBadge();
+        }
         pianoRoll.canvas().repaint();
     }
 
@@ -607,6 +807,7 @@ public final class MidiDocumentView extends DocumentView {
         Track track = activeTrack;
         inputAuditionHeld = true;
         auditionPitch = inputCursorPitch;
+        showInputBadge(inputCursorPitch, inputCursorTick);
         auditionChannel = track == null ? -1 : (track.drumKit() ? 9 : track.channel());
         if (track != null && app().synth().available() && !app().playback().isPlaying()) {
             // 任何文档正在播放时不叠加试听（与单击试听一致）
@@ -621,6 +822,7 @@ public final class MidiDocumentView extends DocumentView {
             return;
         }
         inputAuditionHeld = false;
+        lingerInputBadge();
         if (auditionChannel >= 0) {
             app().synth().previewOff(auditionChannel, auditionPitch);
         }
@@ -655,6 +857,10 @@ public final class MidiDocumentView extends DocumentView {
      * {@code sourceKey} 记下是哪个键按的 —— 松手时只认它，空格与小键盘数字不会互相打断。
      */
     private void beginInputNote(int pitch, int sourceKey) {
+        beginInputNote(pitch, sourceKey, false);
+    }
+
+    private void beginInputNote(int pitch, int sourceKey, boolean rest) {
         if (!inputMode || inputNoteHeld) {
             return;
         }
@@ -664,10 +870,15 @@ public final class MidiDocumentView extends DocumentView {
         }
         inputNoteHeld = true;
         inputNoteKey = sourceKey;
+        inputNoteIsRest = rest;
         inputNoteDownNanos = nanoClock.getAsLong();
         inputNoteStartTick = inputCursorTick;
         inputNoteStartPitch = target;
-        startInputPreview();
+        // 浮牌贴在“按下去之前”的光标位置，左边音名、右边当前调的简谱数字（休止符写 0）
+        showInputBadge(target, inputNoteStartTick, rest);
+        if (!rest) {
+            startInputPreview();
+        }
         pianoRoll.canvas().repaint();
     }
 
@@ -689,6 +900,7 @@ public final class MidiDocumentView extends DocumentView {
         inputNoteKey = 0;
         // 八度偏移只管这一下：输完一个音就回到默认八度，不留给下一个音
         inputOctaveJump = 0;
+        lingerInputBadge();
         long nanos = nanoClock.getAsLong() - inputNoteDownNanos;
         stopInputPreview();
         Track track = activeTrack;
@@ -714,9 +926,12 @@ public final class MidiDocumentView extends DocumentView {
             duration = snapDurationToAssistUnit(duration, finalStart);
         }
         final Note previousNote = previous;
-        Note created = new Note(pitch, finalStart, duration, 100);
-        edit(track, "输入平行线", () -> {
-            if (previousNote != null && !previousNote.isRest()) {
+        boolean rest = inputNoteIsRest;
+        inputNoteIsRest = false;
+        Note created = rest ? Note.rest(pitch, finalStart, duration)
+                : new Note(pitch, finalStart, duration, 100);
+        edit(track, rest ? "输入休止符" : "输入平行线", () -> {
+            if (!rest && previousNote != null && !previousNote.isRest()) {
                 // 只防“叠在同一条上”：用户把光标挪回去再按，就当作要在它里面起始
                 if (created.startTick() <= previousNote.startTick()) {
                     created.setStartTick(previousNote.endTick());
@@ -759,6 +974,8 @@ public final class MidiDocumentView extends DocumentView {
         }
         inputNoteHeld = false;
         inputNoteKey = 0;
+        inputNoteIsRest = false;
+        lingerInputBadge();
         stopInputPreview();
         pianoRoll.canvas().repaint();
     }
@@ -2659,6 +2876,107 @@ public final class MidiDocumentView extends DocumentView {
                 () -> document().tempoMap().setBpm(0, bpm),
                 () -> document().tempoMap().setBpm(0, oldBpm)));
         transport.refresh();
+    }
+
+    /** 调号：主音音级 0..11（0 = C），调式不变。影响小键盘简谱的 1 落点与浮牌里的数字。 */
+    public void setKeySignature(int tonic) {
+        setKeySignature(tonic, document().keyMinor());
+    }
+
+    /** 调号 = 主音音级（0..11）+ 调式（false 大调 / true 自然小调）。 */
+    public void setKeySignature(int tonic, boolean minor) {
+        int oldTonic = document().keyTonic();
+        boolean oldMinor = document().keyMinor();
+        int next = Math.floorMod(tonic, 12);
+        if (next == oldTonic && minor == oldMinor) {
+            return;
+        }
+        document().setKeyTonic(next);
+        document().setKeyMinor(minor);
+        pushEdit(SimpleEdit.value("修改调号",
+                () -> {
+                    document().setKeyTonic(next);
+                    document().setKeyMinor(minor);
+                },
+                () -> {
+                    document().setKeyTonic(oldTonic);
+                    document().setKeyMinor(oldMinor);
+                }));
+        pianoRoll.canvas().repaint();
+        transport.refresh();
+    }
+
+    /** 把焦点还给频谱画布（输入模式下改完运输条上的控件后要能继续敲键）。 */
+    public void focusSpectrum() {
+        pianoRoll.canvas().requestFocusInWindow();
+    }
+
+    /**
+     * 一键移调：所有音轨上发声的平行线整体平移 {@code semitones} 个半音，调号也转到对应主音。
+     *
+     * <p>
+     * 休止符不单独平移（它们本来就是“空隙”的实体化，改完音高后会自己重算）；
+     * 音高越界时夹在 0..127。整个动作是一条可撤销编辑（音高按 id 记前后值，撤销/重做都是绝对值，不会叠加）。
+     * </p>
+     */
+    public void transposeAll(int semitones) {
+        transposeAll(semitones, null);
+    }
+
+    /**
+     * 同上；{@code minor} 顺手把调式换成大调（false）/ 小调（true），传 {@code null} 表示保持原调式。
+     */
+    public void transposeAll(int semitones, Boolean minor) {
+        int shift = semitones;
+        boolean oldMinor = document().keyMinor();
+        boolean newMinor = minor == null ? oldMinor : minor;
+        if (shift == 0 && newMinor == oldMinor) {
+            return;
+        }
+        Map<UUID, Integer> before = new LinkedHashMap<>();
+        Map<UUID, Integer> after = new LinkedHashMap<>();
+        for (Track track : document().tracks()) {
+            for (Note note : track.notes()) {
+                if (note.isRest()) {
+                    continue;
+                }
+                before.put(note.id(), note.pitch());
+                after.put(note.id(), Math.max(0, Math.min(127, note.pitch() + shift)));
+            }
+        }
+        int oldTonic = document().keyTonic();
+        int newTonic = Math.floorMod(oldTonic + shift, 12);
+        Runnable redo = () -> {
+            applyPitches(after);
+            document().setKeyTonic(newTonic);
+            document().setKeyMinor(newMinor);
+        };
+        Runnable undo = () -> {
+            applyPitches(before);
+            document().setKeyTonic(oldTonic);
+            document().setKeyMinor(oldMinor);
+        };
+        redo.run();
+        pushEdit(SimpleEdit.value("一键移调", redo, undo));
+        pianoRoll.canvas().repaint();
+        transport.refresh();
+    }
+
+    /** 按 id 把音高设成给定值（{@link #transposeAll(int)} 的撤销/重做用）。 */
+    private void applyPitches(Map<UUID, Integer> pitches) {
+        for (Track track : document().tracks()) {
+            boolean changed = false;
+            for (Note note : track.notes()) {
+                Integer pitch = pitches.get(note.id());
+                if (pitch != null && pitch != note.pitch()) {
+                    note.setPitch(pitch);
+                    changed = true;
+                }
+            }
+            if (changed) {
+                track.sortNotes();
+            }
+        }
     }
 
     public void addTrack() {

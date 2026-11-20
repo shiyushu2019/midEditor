@@ -22,11 +22,12 @@ import com.example.mideditor.document.MidiDocumentView;
  * <li><b>Q</b>：用当前音轨音色试听光标处的音高；</li>
  * <li><b>空格</b>：按下开始计时、松手落成一条平行线 —— <b>按住多久，音符就有多长</b>
  * （按当前速度配置换算成 tick，走的就是这段真实时间）；</li>
+ * <li><b>小键盘 0</b>：休止符（简谱的 0）—— 按住多久就留多长的空；</li>
  * <li><b>小键盘 1~7</b>：简谱的 do/re/mi/fa/sol/la/si —— 按下就把光标切到那个音高并
  * 立刻开始输入（不用先按空格），松手同样落成平行线；八度取光标的当前八度；</li>
  * <li><b>小键盘 + / -</b>：八度偏移 ±1，只作用于接下来按下的那个数字，输完一个音就归零；</li>
- * <li><b>按住大键盘 +/=</b>（或 <b>-/_</b>）：接下来按下的数字高（低）一个八度；
- * 同时按着 <b>Ctrl</b> 则高（低）两个八度；松开就失效；</li>
+ * <li><b>按住大键盘 +/=</b>（或 <b>-/_</b>）：紧接着按下的那个数字高（低）一个八度，
+ * 用完自动回到原八度（不用按反方向键扳回来）；同时按着 <b>Ctrl</b> 则高（低）两个八度；</li>
  * <li><b>Esc</b>：退出输入模式。</li>
  * </ul>
  *
@@ -68,8 +69,8 @@ public final class InputModeDispatcher implements KeyEventDispatcher {
                 return true;
             }
             if (code == KeyEvent.VK_EQUALS || code == KeyEvent.VK_MINUS) {
-                // 松开大键盘 +/= 或 -/_：八度不再偏移
-                view.setInputOctaveHold(0);
+                // 松开大键盘 +/= 或 -/_：撤掉还没用掉的临时八度偏移
+                view.releaseInputOctaveHold(code);
                 e.consume();
                 return true;
             }
@@ -90,7 +91,7 @@ public final class InputModeDispatcher implements KeyEventDispatcher {
         if ((e.getModifiersEx() & (InputEvent.ALT_DOWN_MASK | InputEvent.META_DOWN_MASK)) != 0) {
             return false;
         }
-        boolean numpadDegree = code >= KeyEvent.VK_NUMPAD1 && code <= KeyEvent.VK_NUMPAD7;
+        boolean numpadDegree = code >= KeyEvent.VK_NUMPAD0 && code <= KeyEvent.VK_NUMPAD7;
         boolean octaveHoldKey = code == KeyEvent.VK_EQUALS || code == KeyEvent.VK_MINUS;
         // 只认「纯 Ctrl+U/L」（Ctrl+Shift+L 仍是“循环域＝选区”，不抢）
         boolean octaveCursorKey = !shift && (code == KeyEvent.VK_U || code == KeyEvent.VK_L);
@@ -124,9 +125,10 @@ public final class InputModeDispatcher implements KeyEventDispatcher {
             // 小键盘 +/-：调整下一个数字的八度；1~7 就是简谱的 do~si，按下即输入
             case KeyEvent.VK_ADD -> view.shiftInputOctaveJump(1);
             case KeyEvent.VK_SUBTRACT -> view.shiftInputOctaveJump(-1);
-            // 大键盘 +/= 与 -/_：按住期间数字整体高/低一个八度
-            case KeyEvent.VK_EQUALS -> view.setInputOctaveHold(1);
-            case KeyEvent.VK_MINUS -> view.setInputOctaveHold(-1);
+            // 大键盘 +/= 与 -/_：给紧接着的那一个数字挂上 ±1 八度（用完自动撤）
+            case KeyEvent.VK_EQUALS -> view.pressInputOctaveHold(1, code);
+            case KeyEvent.VK_MINUS -> view.pressInputOctaveHold(-1, code);
+            case KeyEvent.VK_NUMPAD0 -> view.beginInputRestNote();
             case KeyEvent.VK_NUMPAD1 -> view.beginInputDegreeNote(1, octaveScale);
             case KeyEvent.VK_NUMPAD2 -> view.beginInputDegreeNote(2, octaveScale);
             case KeyEvent.VK_NUMPAD3 -> view.beginInputDegreeNote(3, octaveScale);

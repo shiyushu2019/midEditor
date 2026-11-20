@@ -346,14 +346,13 @@ public final class PianoRollView extends JPanel {
     public void relayout(boolean rebuildHeaders) {
         var document = host.document();
         int ppq = document.ppq();
-        long endTick = Math.max(document.endTick() + ppq * 16L, ppq * 64L);
-        int width = Math.max(timeline.widthOf(endTick, ppq), 1200);
+        int width = Math.max(timeline.widthOf(contentEndTick(ppq), ppq), 1200);
         int height = Math.max(document.tracks().size() * laneHeight(), 1);
         int viewportHeight = scroll.getViewport().getHeight();
         int canvasHeight = Math.max(height, Math.max(200, viewportHeight));
 
+        applyTimeWidth(width);
         canvas.setPreferredSize(new Dimension(width, canvasHeight));
-        ruler.setPreferredSize(new Dimension(width, Theme.RULER_HEIGHT));
         headers.setPreferredSize(new Dimension(Theme.HEADER_WIDTH, canvasHeight));
         keysColumn.setVisible(keyboardRulerVisible);
         int rowHeaderWidth = Theme.HEADER_WIDTH
@@ -366,6 +365,44 @@ public final class PianoRollView extends JPanel {
         canvas.revalidate();
         rowHeader.revalidate();
         repaint();
+    }
+
+    /** 时间轴至少画到这里：内容末尾 / 播放头 / 编辑器光标，再往后留 16 拍。 */
+    private long contentEndTick(int ppq) {
+        long end = Math.max(host.document().endTick(), host.inputCursorTick());
+        end = Math.max(end, host.playheadTick());
+        return Math.max(end + ppq * 16L, ppq * 64L);
+    }
+
+    /** 只改时间轴方向的宽度（画布 + 顶部标尺），别的尺寸不动。 */
+    private void applyTimeWidth(int width) {
+        if (canvas.getPreferredSize().width != width) {
+            canvas.setPreferredSize(new Dimension(width, canvas.getPreferredSize().height));
+        }
+        if (ruler.getPreferredSize().width != width) {
+            ruler.setPreferredSize(new Dimension(width, Theme.RULER_HEIGHT));
+        }
+    }
+
+    /**
+     * 光标 / 播放头往右走时把画布拉长：时间轴原来是有限的（内容末尾 + 16 拍），
+     * 走过头就“跑出可见区域再也看不到了”。这里在刻度前再留至少一屏的余量。
+     */
+    public void ensureWidthFor(long tick) {
+        int ppq = host.document().ppq();
+        int needed = timeline.xAtTick(Math.max(0, tick), ppq) + scrollTailPixels();
+        if (needed <= canvas.getPreferredSize().width) {
+            return;
+        }
+        applyTimeWidth(needed);
+        canvas.revalidate();
+        ruler.revalidate();
+    }
+
+    /** 横向留白：至少一屏宽（视口还没布局时按 800px）。 */
+    private int scrollTailPixels() {
+        int viewportWidth = scroll.getViewport().getWidth();
+        return Math.max(800, viewportWidth);
     }
 
     /** 画布高度（含至少一屏），供行头组件对齐使用。 */
@@ -426,7 +463,14 @@ public final class PianoRollView extends JPanel {
     }
 
     private void onTimelineChanged() {
-        relayout(false);
+        // 缩放只改横向尺寸：不建行头、不整棵组件树重排——之前每次缩放都 relayout，
+        // 滚轮一格就重建一次布局，看起来就是“卡卡的”
+        int ppq = host.document().ppq();
+        applyTimeWidth(Math.max(timeline.widthOf(contentEndTick(ppq), ppq), 1200));
+        canvas.revalidate();
+        canvas.repaint();
+        ruler.revalidate();
+        ruler.repaint();
     }
 
     public void refreshTrackStructure() {
@@ -504,6 +548,7 @@ public final class PianoRollView extends JPanel {
     }
 
     public void scrollToTick(long tick) {
+        ensureWidthFor(tick);
         int x = timeline.xAtTick(tick, host.document().ppq());
         java.awt.Rectangle view = scroll.getViewport().getViewRect();
         if (x < view.x + 20 || x > view.x + view.width - 60) {

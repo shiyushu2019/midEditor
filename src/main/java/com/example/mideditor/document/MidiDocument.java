@@ -25,6 +25,10 @@ public final class MidiDocument {
     private Path filePath;
     private String name;
     private boolean dirty;
+    /** 调号（主音音级 0..11，0 = C）：当前用于输入模式的小键盘简谱与音名浮牌，后续可接 UI / 存盘。 */
+    private int keyTonic;
+    /** 调式：false = 大调（默认）、true = 小调（自然小调）。 */
+    private boolean keyMinor;
 
     public MidiDocument(int ppq) {
         this.id = UUID.randomUUID();
@@ -43,6 +47,36 @@ public final class MidiDocument {
 
     public TempoMap tempoMap() {
         return tempoMap;
+    }
+
+    /** 调号的主音音级（0 = C、1 = C#/Db … 11 = B），默认 C。 */
+    public int keyTonic() {
+        return keyTonic;
+    }
+
+    public void setKeyTonic(int tonic) {
+        this.keyTonic = Math.floorMod(tonic, 12);
+    }
+
+    /** 调式：false = 大调、true = 小调。 */
+    public boolean keyMinor() {
+        return keyMinor;
+    }
+
+    public void setKeyMinor(boolean minor) {
+        this.keyMinor = minor;
+    }
+
+    private static final String[] KEY_NAMES = {
+            "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+
+    /** 调号显示名（"C" / "C#" … "B"；小调在后面加小写 m，如 "Am"）。 */
+    public static String keyName(int tonic) {
+        return KEY_NAMES[Math.floorMod(tonic, 12)];
+    }
+
+    public static String keyName(int tonic, boolean minor) {
+        return keyName(tonic) + (minor ? "m" : "");
     }
 
     public List<TimeSignature> timeSignatures() {

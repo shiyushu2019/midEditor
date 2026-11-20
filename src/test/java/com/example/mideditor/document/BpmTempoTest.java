@@ -3,17 +3,23 @@ package com.example.mideditor.document;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.GraphicsEnvironment;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
+import javax.swing.JComboBox;
 import javax.swing.JSpinner;
 import javax.swing.SwingUtilities;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import org.junit.jupiter.api.Test;
 
 import com.example.mideditor.app.AppContext;
 import com.example.mideditor.app.MainFrame;
+import com.example.mideditor.io.MidiFileCodec;
 
 /**
  * 改完 BPM 立刻按播放：那次改动必须真的生效（不能只是挂在输入框里的文字）。
@@ -52,6 +58,39 @@ class BpmTempoTest {
         }
     }
 
+    /** 调号下拉框就在 BPM / 网格那一片（12 个音 × 大/小调）；改完要跟着文件存下来。 */
+    @Test
+    void keySignatureComboSetsTheKeyAndItSurvivesSaving() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "需要图形环境");
+        AppContext app = new AppContext();
+        MainFrame[] holder = new MainFrame[1];
+        try {
+            MidiDocumentView view = openDocument(app, holder);
+            JComboBox<?> keyBox = findNameCombo(view.transportBar());
+            assertNotNull(keyBox, "传输条上应当有调号下拉框");
+            assertEquals(24, keyBox.getItemCount(), "12 个主音 × 大/小调");
+            assertEquals(0, keyBox.getSelectedIndex(), "默认 C 大调");
+
+            SwingUtilities.invokeAndWait(() -> keyBox.setSelectedIndex(14)); // G 大调
+            assertEquals(7, view.document().keyTonic(), "选中 G 就改了文档的调号");
+            assertFalse(view.document().keyMinor(), "G 大调");
+
+            SwingUtilities.invokeAndWait(() -> keyBox.setSelectedIndex(15)); // G 小调
+            assertTrue(view.document().keyMinor(), "选中 Gm 就是小调");
+
+            Path file = Files.createTempFile("mid-editor-key", ".mid");
+            try {
+                MidiFileCodec.write(view.document(), file);
+                assertEquals(7, MidiFileCodec.read(file).keyTonic(), "调号主音跟着文件走");
+                assertTrue(MidiFileCodec.read(file).keyMinor(), "大小调也跟着文件走");
+            } finally {
+                Files.deleteIfExists(file);
+            }
+        } finally {
+            close(app, holder[0]);
+        }
+    }
+
     private static MidiDocumentView openDocument(AppContext app, MainFrame[] holder) throws Exception {
         MidiDocumentView[] holderView = new MidiDocumentView[1];
         SwingUtilities.invokeAndWait(() -> {
@@ -73,6 +112,26 @@ class BpmTempoTest {
             }
             if (component instanceof Container container) {
                 JSpinner nested = findSpinner(container);
+                if (nested != null) {
+                    return nested;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** 找第一个「元素是字符串」的下拉框（调号那个；网格下拉框里放的是枚举）。 */
+    private static JComboBox<?> findNameCombo(Container root) {
+        if (root == null) {
+            return null;
+        }
+        for (Component component : root.getComponents()) {
+            if (component instanceof JComboBox<?> combo && combo.getItemCount() == 24
+                    && combo.getItemAt(0) instanceof String) {
+                return combo;
+            }
+            if (component instanceof Container container) {
+                JComboBox<?> nested = findNameCombo(container);
                 if (nested != null) {
                     return nested;
                 }

@@ -1,6 +1,7 @@
 package com.example.mideditor.ui.pianoroll;
 
 import java.awt.Color;
+import java.awt.FontMetrics;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.util.List;
@@ -48,6 +49,7 @@ final class PianoRollPainter {
         paintLocks(g, view, document, clip);
         paintPlayhead(g, view, host, clip);
         paintInputCursor(g, view, host, document, clip);
+        paintInputBadge(g, view, host, document, clip);
 
         Rectangle marquee = canvas.marquee();
         if (marquee != null) {
@@ -362,6 +364,65 @@ final class PianoRollPainter {
         int radius = Math.max(2, Math.min(5, rowHeight / 2 + 1));
         g.setColor(Theme.INPUT_CURSOR);
         g.fillOval(x - radius, y - radius, radius * 2, radius * 2);
+    }
+
+    /** 牌子每格的边长：整体是 2a（长）× a（高），中间一条竖线分成两个正方形。 */
+    private static final int INPUT_BADGE_CELL = 20;
+
+    /**
+     * 输入模式：按住输入（空格 / Q / 小键盘数字）时，浮在「按下之前光标位置」旁边的小牌。
+     *
+     * <p>
+     * 左格是科学记音法（MIDI 60 = C4，与左侧键盘标尺一致），右格是当前调下的简谱数字；
+     * 松手后由 {@code MidiDocumentView} 再让它停留 1 秒（{@code inputBadgeVisible()}）。
+     * </p>
+     */
+    private static void paintInputBadge(Graphics2D g, PianoRollView view, MidiDocumentView host,
+            MidiDocument document, Rectangle clip) {
+        if (!host.inputMode() || !host.inputBadgeVisible()) {
+            return;
+        }
+        Track track = host.activeTrack();
+        if (track == null) {
+            return;
+        }
+        int laneIndex = document.tracks().indexOf(track);
+        if (laneIndex < 0) {
+            return;
+        }
+        int cell = INPUT_BADGE_CELL;
+        int width = cell * 2;
+        int height = cell;
+        int pitch = host.inputBadgePitch();
+        int px = view.timeline().xAtTick(host.inputBadgeTick(), document.ppq());
+        int py = (view.rowTop(track, laneIndex, pitch) + view.rowBottom(track, laneIndex, pitch)) / 2;
+
+        // 贴在光标右上方，离一点距离；靠近视口边缘时夹回可见区域内（否则跟着内容滚出去会看不见）
+        Rectangle visible = view.visibleRect();
+        int x = px + 14;
+        int y = py - height - 14;
+        x = Math.max(visible.x + 2, Math.min(x, visible.x + visible.width - width - 2));
+        y = Math.max(visible.y + 2, Math.min(y, visible.y + visible.height - height - 2));
+        if (x + width < clip.x || x > clip.x + clip.width || y + height < clip.y || y > clip.y + clip.height) {
+            return;
+        }
+
+        g.setColor(Theme.INPUT_BADGE_FILL);
+        g.fillRect(x, y, width, height);
+        g.setColor(Theme.INPUT_BADGE_BORDER);
+        g.drawRect(x, y, width - 1, height - 1);
+        g.drawLine(x + cell, y, x + cell, y + height - 1);
+        g.setColor(Theme.INPUT_BADGE_TEXT);
+        g.setFont(Theme.SMALL_FONT);
+        drawCentered(g, host.inputBadgePitchName(), x, y, cell, height);
+        drawCentered(g, host.inputBadgeDegree(), x + cell, y, cell, height);
+    }
+
+    private static void drawCentered(Graphics2D g, String text, int x, int y, int width, int height) {
+        FontMetrics metrics = g.getFontMetrics();
+        int tx = x + (width - metrics.stringWidth(text)) / 2;
+        int ty = y + (height - metrics.getHeight()) / 2 + metrics.getAscent();
+        g.drawString(text, tx, ty);
     }
 
     private static void paintLoopRegion(Graphics2D g, PianoRollView view, MidiDocumentView host, Rectangle clip) {

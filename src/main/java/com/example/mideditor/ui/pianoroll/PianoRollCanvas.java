@@ -328,9 +328,10 @@ public final class PianoRollCanvas extends JComponent {
                     host().app().refreshApplicationState();
                 }
             } else if (e.isAltDown()) {
-                // Alt+滚轮：左右缩放（以鼠标处 tick 为锚点）
+                // Alt+滚轮：左右缩放（以鼠标处 tick 为锚点）。
+                // 只同步传输条上的缩放滑块，不做整应用刷新——缩放时逐格刷面板才是“卡卡的”的来源
                 view.wheelZoomTime(e.getX(), notches);
-                host().app().refreshApplicationState();
+                host().transportBar().refresh();
             } else if (e.isShiftDown()) {
                 // Shift+滚轮：左右滚动
                 view.wheelScrollTime(notches);

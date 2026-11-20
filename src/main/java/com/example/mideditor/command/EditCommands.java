@@ -102,7 +102,7 @@ final class EditCommands {
                 CommandContext::hasSelection, null));
 
         // 输入模式：WASD 移动光标、Q 试听、空格按住多久就输入多长（Esc 退出）
-        // Ctrl+I 三态循环：关 → 输入模式＋节奏辅助 → 输入模式 → 关
+        // Ctrl+I 两态：关 ⇄ 输入模式＋节奏辅助（没有“中间态”）
         AppCommand inputMode = new AppCommand(AppCommandIds.EDIT_INPUT_MODE, "输入模式", CommandScope.DOCUMENT,
                 FileCommands.key(KeyEvent.VK_I, InputEvent.CTRL_DOWN_MASK),
                 ctx -> {
@@ -110,13 +110,11 @@ final class EditCommands {
                         return;
                     }
                     MidiDocumentView view = ctx.document();
-                    if (!view.inputMode()) {
-                        view.setInputMode(true);
-                        view.setInputBeatSnap(true);
-                    } else if (view.inputBeatSnap()) {
-                        view.setInputBeatSnap(false);
-                    } else {
+                    if (view.inputMode()) {
                         view.setInputMode(false);
+                    } else {
+                        view.setInputBeatSnap(true);
+                        view.setInputMode(true);
                     }
                 },
                 CommandContext::hasDocument,
@@ -133,6 +131,11 @@ final class EditCommands {
         beatSnap.putIcon(Icons.beatSnap());
         beatSnap.putShortDescription("输入的音符对齐到网格");
         registry.register(beatSnap);
+
+        // 一键移调：整个文档平移若干半音，调号跟着转
+        registry.register(new AppCommand(AppCommandIds.EDIT_TRANSPOSE, "一键移调", CommandScope.DOCUMENT,
+                null, ctx -> showTransposeDialog(ctx.app(), ctx.document()),
+                CommandContext::hasDocument, null));
 
         // ---- 平行线
         registry.register(new AppCommand(AppCommandIds.NOTE_ADD, "添加平行线", CommandScope.TRACK,
@@ -330,6 +333,53 @@ final class EditCommands {
         registry.register(new AppCommand(AppCommandIds.TRACK_TOGGLE_SOLO, "独奏音轨", CommandScope.TRACK,
                 null, ctx -> ctx.document().toggleSolo(ctx.activeTrack()), CommandContext::hasTrack,
                 ctx -> ctx.hasTrack() && ctx.activeTrack().solo()));
+    }
+
+    /** 一键移调对话框：填半音数（正数往上、负数往下），可顺手改大/小调，实时预览调号。 */
+    private static void showTransposeDialog(AppContext app, MidiDocumentView view) {
+        int tonic = view.document().keyTonic();
+        boolean minor = view.document().keyMinor();
+        javax.swing.JSpinner semitones = new javax.swing.JSpinner(
+                new javax.swing.SpinnerNumberModel(0, -24, 24, 1));
+        semitones.setToolTipText("平移的半音数（正数往上、负数往下）");
+        javax.swing.JComboBox<String> mode = new javax.swing.JComboBox<>(
+                new String[] { "保持调式", "大调", "小调" });
+        mode.setToolTipText("顺手把整首换成大调 / 小调（音高不额外变化）");
+        javax.swing.JLabel preview = new javax.swing.JLabel();
+        preview.setFont(com.example.mideditor.ui.theme.Theme.SMALL_FONT);
+        Runnable refresh = () -> {
+            int shift = ((Number) semitones.getValue()).intValue();
+            boolean targetMinor = switch (mode.getSelectedIndex()) {
+                case 1 -> false;
+                case 2 -> true;
+                default -> minor;
+            };
+            preview.setText("调号："
+                    + com.example.mideditor.document.MidiDocument.keyName(tonic, minor)
+                    + " → " + com.example.mideditor.document.MidiDocument.keyName(tonic + shift, targetMinor));
+        };
+        semitones.addChangeListener(e -> refresh.run());
+        mode.addActionListener(e -> refresh.run());
+        refresh.run();
+
+        javax.swing.JPanel panel = new javax.swing.JPanel(new java.awt.GridLayout(0, 1, 0, 6));
+        panel.add(new javax.swing.JLabel("整个文档平移多少个半音："));
+        panel.add(semitones);
+        panel.add(new javax.swing.JLabel("调式："));
+        panel.add(mode);
+        panel.add(preview);
+
+        int answer = javax.swing.JOptionPane.showConfirmDialog(app.mainFrame(), panel, "一键移调",
+                javax.swing.JOptionPane.OK_CANCEL_OPTION, javax.swing.JOptionPane.PLAIN_MESSAGE);
+        if (answer != javax.swing.JOptionPane.OK_OPTION) {
+            return;
+        }
+        Boolean targetMinor = switch (mode.getSelectedIndex()) {
+            case 1 -> Boolean.FALSE;
+            case 2 -> Boolean.TRUE;
+            default -> null;
+        };
+        view.transposeAll(((Number) semitones.getValue()).intValue(), targetMinor);
     }
 
     /** 选中项是否与任何收尾锁定相关（自己锁着别人，或被别人锁着）→ 决定「解除锁定」是否可点。 */

@@ -108,6 +108,8 @@ public final class MenuBarBuilder {
         item(menu, AppCommandIds.EDIT_VELOCITY_DOWN, "力度 -10");
         item(menu, AppCommandIds.EDIT_SPLIT_AT_PLAYHEAD, "在播放头拆分");
         menu.addSeparator();
+        item(menu, AppCommandIds.EDIT_TRANSPOSE, "一键移调…");
+        menu.addSeparator();
         checkItem(menu, AppCommandIds.EDIT_INPUT_MODE, "输入模式");
         checkItem(menu, AppCommandIds.EDIT_INPUT_BEAT_SNAP, "节奏辅助");
 
