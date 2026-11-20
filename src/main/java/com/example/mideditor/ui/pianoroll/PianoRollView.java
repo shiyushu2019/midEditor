@@ -556,6 +556,19 @@ public final class PianoRollView extends JPanel {
         }
     }
 
+    /** 只有目标已经跑出可见范围时才滚动（拖动播放头时用：视野内不乱动）。 */
+    public void ensureTickVisible(long tick) {
+        ensureWidthFor(tick);
+        int x = timeline.xAtTick(tick, host.document().ppq());
+        java.awt.Rectangle view = scroll.getViewport().getViewRect();
+        if (view.width <= 0) {
+            return;
+        }
+        if (x < view.x || x > view.x + view.width - 40) {
+            scroll.getViewport().setViewPosition(new java.awt.Point(Math.max(0, x - view.width / 2), view.y));
+        }
+    }
+
     /** 把时间轴拉回开头（横向 x=0），纵向位置不变。 */
     public void scrollToTimeStart() {
         java.awt.Rectangle view = scroll.getViewport().getViewRect();

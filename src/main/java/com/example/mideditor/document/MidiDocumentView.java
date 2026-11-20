@@ -113,6 +113,8 @@ public final class MidiDocumentView extends DocumentView {
     private int inputBadgePitch = -1;
     private long inputBadgeTick;
     private long inputBadgeHideAtNanos;
+    /** 浮牌画在哪条音轨的泳道里（为空就用活动音轨）。 */
+    private Track inputBadgeTrack;
     /** 浮牌当前显示的是不是休止符（右格写 0）。 */
     private boolean inputBadgeRest;
     /** 正在输入的这条音由哪个键按下（空格 / 小键盘数字），松手时只认这个键；0 = 不限制。 */
@@ -327,19 +329,23 @@ public final class MidiDocumentView extends DocumentView {
         if (engine.owner() == this && engine.plan() != null && engine.state() != PlaybackEngine.State.STOPPED) {
             engine.seek(target);
         }
+        // 拖到视野外面就跟着滚过去（不然播放头跑出屏幕就看不见了）
+        pianoRoll.ensureTickVisible(target);
         pianoRoll.repaintPlayhead(previous, target);
         transport.refresh();
         app().refreshApplicationState();
     }
 
     private void onUiTick() {
-        // 输入模式：按着输入时把“正在输入”的幽灵条逐帧刷出来（长度 = 已按住的真实时长）；
-        // 音名 / 简谱浮牌也是这时限到的——到点先清掉状态，这一帧就把牌子抹掉
+        // 浮牌到点先清掉状态，这一帧就把牌子抹掉（输入模式内外都一样）
+        if (inputBadgePitch >= 0 && !inputBadgeHeld
+                && nanoClock.getAsLong() >= inputBadgeHideAtNanos) {
+            inputBadgePitch = -1;
+            inputBadgeTrack = null;
+            pianoRoll.canvas().repaint();
+        }
+        // 输入模式：按着输入时把“正在输入”的幽灵条逐帧刷出来（长度 = 已按住的真实时长）
         if (inputMode && (inputNoteHeld || inputBadgePitch >= 0)) {
-            if (inputBadgePitch >= 0 && !inputBadgeHeld
-                    && nanoClock.getAsLong() >= inputBadgeHideAtNanos) {
-                inputBadgePitch = -1;
-            }
             pianoRoll.canvas().repaint();
         }
         PlaybackEngine engine = app().playback();
@@ -499,6 +505,11 @@ public final class MidiDocumentView extends DocumentView {
         return inputBadgeTick;
     }
 
+    /** 牌子该画在哪条音轨的泳道里（方向键走位 / WASD 移动时可能就是非活动轨）。 */
+    public Track inputBadgeTrack() {
+        return inputBadgeTrack;
+    }
+
     /** 左格：科学记音法（如 C4）。 */
     public String inputBadgePitchName() {
         return scientificPitchName(inputBadgePitch);
@@ -542,11 +553,24 @@ public final class MidiDocumentView extends DocumentView {
     }
 
     private void showInputBadge(int pitch, long tick, boolean rest) {
+        showInputBadge(pitch, tick, rest, activeTrack);
+    }
+
+    private void showInputBadge(int pitch, long tick, boolean rest, Track track) {
         inputBadgeHeld = true;
         inputBadgePitch = Math.max(0, Math.min(127, pitch));
         inputBadgeTick = Math.max(0, tick);
         inputBadgeRest = rest;
+        inputBadgeTrack = track;
         inputBadgeHideAtNanos = 0;
+    }
+
+    /** 给一个具体的音高/位置亮 1 秒浮牌（方向键走位、WASD 移动、输入都用它）。 */
+    private void flashInputBadge(Track track, int pitch, long tick, boolean rest) {
+        showInputBadge(pitch, tick, rest, track);
+        inputBadgeHeld = false;
+        inputBadgeHideAtNanos = nanoClock.getAsLong() + INPUT_BADGE_LINGER_NANOS;
+        pianoRoll.canvas().repaint();
     }
 
     /** 松手：牌子再停留 1 秒（由 {@code onUiTick} 负责到点清掉并重绘）。 */
@@ -1040,6 +1064,11 @@ public final class MidiDocumentView extends DocumentView {
     public void togglePlayPause() {
         // 先把“输了但没回车”的 BPM 落地：否则按 F5 播的还是旧速度，看起来就是“调了没生效”
         transport.commitBpmEdit();
+        // Q 键按住预览的那个音也要先收：否则会被开播时的通道重置硬切，听起来像“开头冒出一个短促的怪音”
+        endInputAudition();
+        if (inputNoteHeld) {
+            abortInputNote();
+        }
         PlaybackEngine engine = app().playback();
         if (!engine.state().equals(PlaybackEngine.State.STOPPED) && engine.owner() != this) {
             engine.stop();
@@ -1061,8 +1090,7 @@ public final class MidiDocumentView extends DocumentView {
         if (engine.owner() == this) {
             engine.stop();
             playheadTick = 0;
-            // 停在开头时频谱也回到开头，不然看到的是尾巴、播放头却在屏幕外
-            pianoRoll.scrollToTimeStart();
+            // 停止只把播放头收回 0，不动视野（用户可能正在看后面那一段）
         }
         refresh();
         app().refreshApplicationState();
@@ -1412,6 +1440,15 @@ public final class MidiDocumentView extends DocumentView {
                 track.volume(), track.pan(), millis);
     }
 
+    /** 鼠标单击一条平行线：试听 + 亮 1 秒浮牌（拖动只亮牌不发声，走的是另一条路）。 */
+    public void auditionNoteWithBadge(Track track, Note note) {
+        if (track == null || note == null || note.isRest()) {
+            return;
+        }
+        auditionNote(track, note);
+        flashInputBadge(track, note.pitch(), note.startTick(), false);
+    }
+
     /** 最近一次试听的 {音高, 毫秒}（诊断与测试用）。 */
     long[] lastAuditionInfo() {
         return lastAudition;
@@ -1674,6 +1711,48 @@ public final class MidiDocumentView extends DocumentView {
         }
         commitMultiEdit("移动平行线");
         scrollSelectionIntoView();
+        // 选中的音音高全都一样（含只选一条）就给反馈：一个音的试听/浮牌就代表全部；
+        // 音高参差的批量移动一律不发声、不出牌
+        if (selectionSharesOnePitch()) {
+            Note sounded = firstSoundingSelection();
+            if (sounded != null) {
+                Track owner = trackOf(sounded);
+                if (owner != null) {
+                    auditionNote(owner, sounded);
+                    flashInputBadge(owner, sounded.pitch(), sounded.startTick(), false);
+                }
+            }
+        }
+    }
+
+    /** 选中的发声平行线是不是同一个音高（只选一条也算）。 */
+    private boolean selectionSharesOnePitch() {
+        Integer pitch = null;
+        for (Note note : selection().resolve(document())) {
+            if (note.isRest()) {
+                continue;
+            }
+            if (pitch == null) {
+                pitch = note.pitch();
+            } else if (pitch != note.pitch()) {
+                return false;
+            }
+        }
+        return pitch != null;
+    }
+
+    /** 多选里第一条发声的平行线（WASD 移动后用来试听 / 亮牌）。 */
+    private Note firstSoundingSelection() {
+        Note first = null;
+        for (Note note : selection().resolve(document())) {
+            if (note.isRest()) {
+                continue;
+            }
+            if (first == null || note.startTick() < first.startTick()) {
+                first = note;
+            }
+        }
+        return first;
     }
 
     /** 键盘移动之后把选中项滚进可视区（用它自己的起点作为锚点）。 */
@@ -1724,6 +1803,8 @@ public final class MidiDocumentView extends DocumentView {
         selection().setSingle(target);
         pianoRoll.scrollToTick(target.startTick());
         auditionNote(track, target);
+        // 换了一个音就亮 1 秒浮牌（科学记音法 + 简谱数字），与输入模式无关
+        flashInputBadge(track, target.pitch(), target.startTick(), false);
         pianoRoll.canvas().repaint();
     }
 
@@ -2262,8 +2343,8 @@ public final class MidiDocumentView extends DocumentView {
             cancelEditingSilently();
             if (app().mainFrame() != null) {
                 app().mainFrame().statusBar().setMessage(rightward
-                        ? "无法向右延长：右侧已紧邻其它平行线"
-                        : "无法向左延长：左侧已紧邻其它平行线或已到 0");
+                        ? "无法向右延长"
+                        : "无法向左延长");
             }
             return;
         }
@@ -2374,7 +2455,7 @@ public final class MidiDocumentView extends DocumentView {
         if (!changed) {
             cancelEditingSilently();
             if (app().mainFrame() != null) {
-                app().mainFrame().statusBar().setMessage("无法再缩短：已经只剩一格");
+                app().mainFrame().statusBar().setMessage("无法再缩短");
             }
             return;
         }
@@ -2524,6 +2605,17 @@ public final class MidiDocumentView extends DocumentView {
             }
         }
         reconcileRests(document().tracks());
+        // 鼠标拖动只给浮牌反馈，**不试听**（拖动中连着发声音太吵）；
+        // 只有“选中的音音高一致”时才给牌（一个音的牌就代表全部），音高参差的批量拖动不出牌
+        if ((deltaTicks != 0 || deltaPitch != 0) && selectionSharesOnePitch()) {
+            Note anchor = firstMovingNote();
+            if (anchor != null && !anchor.isRest()) {
+                Track anchorTrack = trackOfNote(anchor);
+                if (anchorTrack != null) {
+                    flashInputBadge(anchorTrack, anchor.pitch(), anchor.startTick(), false);
+                }
+            }
+        }
     }
 
     /** 拖拽吸附的距离阈值（按像素换算成 tick，缩放后手感一致）。 */
@@ -2977,6 +3069,152 @@ public final class MidiDocumentView extends DocumentView {
                 track.sortNotes();
             }
         }
+    }
+
+    /** 和弦轨名字里的分隔符：「旋律轨名 · 三音」。 */
+    public static final String CHORD_TRACK_SEPARATOR = " · ";
+
+    /** 调内音级步数 → 和弦音名字（2 = 三音、4 = 五音……）。 */
+    public static String chordRoleName(int steps) {
+        return switch (steps) {
+            case 2 -> "三音";
+            case 3 -> "四音";
+            case 4 -> "五音";
+            case 5 -> "六音";
+            case 6 -> "七音";
+            case 7 -> "八度";
+            default -> steps + " 级";
+        };
+    }
+
+    /**
+     * 添加和弦：把这条音轨上的每个音按当前调叠成和弦，和弦音写到<b>它下面的新音轨</b>里
+     * （一种和弦音一条轨，名字 = 旋律轨名 · 三音 / 五音 / 七音 …）。
+     *
+     * <p>
+     * 就跟「添加音轨」一样普通：**每次调用都新建一组音轨，不删不改任何已有音轨**。
+     * 所以对和弦轨再用一次也照样按算法叠出新的和弦轨，不做任何“这是和弦轨”的特殊判断。
+     * 整个动作是一条可撤销编辑。
+     * </p>
+     *
+     * @param melody 旋律轨（通常是活动音轨）
+     * @param steps  调内音级步数：2 = 三音、4 = 五音、6 = 七音
+     * @param below  true = 和弦音放在旋律下方，false = 上方
+     * @return 新生成的和弦音条数（0 = 这条音轨没有可配和弦的音）
+     */
+    public int addChord(Track melody, int[] steps, boolean below) {
+        if (melody == null || steps == null || steps.length == 0) {
+            return 0;
+        }
+        List<Note> sources = new ArrayList<>();
+        for (Note note : melody.notes()) {
+            if (!note.isRest()) {
+                sources.add(note);
+            }
+        }
+        if (sources.isEmpty()) {
+            return 0;
+        }
+        sources.sort(java.util.Comparator.comparingLong(Note::startTick).thenComparingInt(Note::pitch));
+        int tonic = document().keyTonic();
+        boolean minor = document().keyMinor();
+
+        List<Track> newTracks = new ArrayList<>();
+        Map<Track, List<Note>> additions = new LinkedHashMap<>();
+        List<Note> created = new ArrayList<>();
+        for (int step : steps) {
+            Track track = new Track(melody.name() + CHORD_TRACK_SEPARATOR + chordRoleName(step),
+                    document().allocateChannel(false), 0,
+                    TrackPalette.at(document().tracks().size() + newTracks.size()));
+            List<Note> notes = new ArrayList<>();
+            for (Note source : sources) {
+                Note note = new Note(chordInterval(source.pitch(), step, tonic, minor, below),
+                        source.startTick(), source.durationTicks(), source.velocity());
+                notes.add(note);
+                created.add(note);
+            }
+            newTracks.add(track);
+            additions.put(track, notes);
+        }
+
+        Runnable redo = () -> {
+            int melodyIndex = document().tracks().indexOf(melody);
+            for (int i = 0; i < newTracks.size(); i++) {
+                Track track = newTracks.get(i);
+                if (!document().tracks().contains(track)) {
+                    int at = melodyIndex < 0 ? document().tracks().size() : melodyIndex + 1 + i;
+                    document().addTrack(Math.min(at, document().tracks().size()), track);
+                }
+                for (Note note : additions.get(track)) {
+                    if (track.noteById(note.id()) == null) {
+                        track.addNote(note);
+                    }
+                }
+                track.sortNotes();
+                track.autoRangeFromNotes();
+            }
+        };
+        Runnable undo = () -> {
+            for (Track track : newTracks) {
+                java.util.Set<UUID> ids = new java.util.HashSet<>();
+                for (Note note : additions.get(track)) {
+                    ids.add(note.id());
+                }
+                track.notes().removeIf(note -> ids.contains(note.id()));
+                document().removeTrack(track);
+            }
+        };
+        redo.run();
+        pushEdit(SimpleEdit.value("添加和弦", redo, undo));
+        selection().setAll(created);
+        int focus = document().tracks().indexOf(melody) + 1;
+        pianoRoll.scrollToLane(Math.max(0, Math.min(focus, document().tracks().size() - 1)));
+        pianoRoll.canvas().repaint();
+        transport.refresh();
+        if (app().mainFrame() != null) {
+            app().mainFrame().statusBar().setMessage("添加和弦：" + created.size() + " 条");
+        }
+        return created.size();
+    }
+
+    /**
+     * 调内叠音：把 {@code pitch} 当根音，取音阶上的第 {@code steps} 个音级（2 = 三音、4 = 五音）。
+     *
+     * <p>
+     * 不在音阶上的半音按当前调式的固定音程补（大调三音 +4、小调三音 +3，五音 +7，七音 +11/+10）；
+     * {@code below} 为真时往下方取。
+     * </p>
+     */
+    static int chordInterval(int pitch, int steps, int tonic, boolean minor, boolean below) {
+        int[] scale = minor ? DEGREE_SEMITONES_MINOR : DEGREE_SEMITONES_MAJOR;
+        int root = Math.max(0, Math.min(127, pitch));
+        int base = root - Math.floorMod(tonic, 12);
+        int octave = Math.floorDiv(base, 12);
+        int rel = base - octave * 12;
+        int degree = -1;
+        for (int i = 0; i < scale.length; i++) {
+            if (scale[i] == rel) {
+                degree = i;
+                break;
+            }
+        }
+        if (degree < 0) {
+            int semitones = switch (steps) {
+                case 2 -> minor ? 3 : 4;
+                case 3 -> 5;
+                case 4 -> 7;
+                case 5 -> 9;
+                case 6 -> minor ? 10 : 11;
+                case 7 -> 12;
+                default -> steps * 2;
+            };
+            return Math.max(0, Math.min(127, root + (below ? -semitones : semitones)));
+        }
+        int index = octave * 7 + degree + (below ? -steps : steps);
+        int targetOctave = Math.floorDiv(index, 7);
+        int targetDegree = index - targetOctave * 7;
+        int result = Math.floorMod(tonic, 12) + targetOctave * 12 + scale[targetDegree];
+        return Math.max(0, Math.min(127, result));
     }
 
     public void addTrack() {

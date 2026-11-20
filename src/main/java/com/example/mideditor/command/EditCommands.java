@@ -129,7 +129,6 @@ final class EditCommands {
                 ctx -> ctx.hasDocument() && ctx.document().inputMode(),
                 ctx -> ctx.hasDocument() && ctx.document().inputBeatSnap());
         beatSnap.putIcon(Icons.beatSnap());
-        beatSnap.putShortDescription("输入的音符对齐到网格");
         registry.register(beatSnap);
 
         // 一键移调：整个文档平移若干半音，调号跟着转
@@ -216,7 +215,7 @@ final class EditCommands {
                 }, CommandContext::hasDocument, null));
 
         registry.register(new AppCommand(AppCommandIds.NOTE_SELECT_UP, "选中上一条", CommandScope.DOCUMENT,
-                FileCommands.key(KeyEvent.VK_UP, 0),
+                null,
                 ctx -> {
                     if (TextFocusGuard.isTextEditing()) {
                         return;
@@ -225,7 +224,7 @@ final class EditCommands {
                 }, CommandContext::hasDocument, null));
 
         registry.register(new AppCommand(AppCommandIds.NOTE_SELECT_DOWN, "选中下一条", CommandScope.DOCUMENT,
-                FileCommands.key(KeyEvent.VK_DOWN, 0),
+                null,
                 ctx -> {
                     if (TextFocusGuard.isTextEditing()) {
                         return;
@@ -320,6 +319,11 @@ final class EditCommands {
                 null, ctx -> ctx.document().removeTrack(ctx.activeTrack()),
                 ctx -> ctx.hasTrack() && ctx.document().document().tracks().size() > 1, null));
 
+        // 添加和弦：永远以当前音轨为旋律，和弦音写到它下面的新音轨（永不发虚）
+        registry.register(new AppCommand(AppCommandIds.TRACK_ADD_CHORD, "添加和弦", CommandScope.TRACK,
+                null, ctx -> showChordDialog(ctx.app(), ctx.document()),
+                CommandContext::hasTrack, null));
+
         registry.register(new AppCommand(AppCommandIds.TRACK_MOVE_UP, "音轨上移", CommandScope.TRACK,
                 null, ctx -> ctx.document().moveTrack(ctx.activeTrack(), -1), CommandContext::hasTrack, null));
 
@@ -341,10 +345,10 @@ final class EditCommands {
         boolean minor = view.document().keyMinor();
         javax.swing.JSpinner semitones = new javax.swing.JSpinner(
                 new javax.swing.SpinnerNumberModel(0, -24, 24, 1));
-        semitones.setToolTipText("平移的半音数（正数往上、负数往下）");
+        semitones.setToolTipText("半音数");
         javax.swing.JComboBox<String> mode = new javax.swing.JComboBox<>(
                 new String[] { "保持调式", "大调", "小调" });
-        mode.setToolTipText("顺手把整首换成大调 / 小调（音高不额外变化）");
+        mode.setToolTipText("调式");
         javax.swing.JLabel preview = new javax.swing.JLabel();
         preview.setFont(com.example.mideditor.ui.theme.Theme.SMALL_FONT);
         Runnable refresh = () -> {
@@ -380,6 +384,35 @@ final class EditCommands {
             default -> null;
         };
         view.transposeAll(((Number) semitones.getValue()).intValue(), targetMinor);
+    }
+
+    /** 添加和弦对话框：选和弦类型和叠在上方还是下方，然后按当前音轨重算。 */
+    private static void showChordDialog(AppContext app, MidiDocumentView view) {
+        javax.swing.JComboBox<String> type = new javax.swing.JComboBox<>(
+                new String[] { "三和弦", "七和弦", "六和弦", "挂四", "五度" });
+        type.setToolTipText("类型");
+        javax.swing.JComboBox<String> position = new javax.swing.JComboBox<>(new String[] { "上方", "下方" });
+        position.setToolTipText("位置");
+
+        javax.swing.JPanel panel = new javax.swing.JPanel(new java.awt.GridLayout(0, 1, 0, 6));
+        panel.add(new javax.swing.JLabel("类型"));
+        panel.add(type);
+        panel.add(new javax.swing.JLabel("位置"));
+        panel.add(position);
+
+        int answer = javax.swing.JOptionPane.showConfirmDialog(app.mainFrame(), panel, "添加和弦",
+                javax.swing.JOptionPane.OK_CANCEL_OPTION, javax.swing.JOptionPane.PLAIN_MESSAGE);
+        if (answer != javax.swing.JOptionPane.OK_OPTION) {
+            return;
+        }
+        int[] steps = switch (type.getSelectedIndex()) {
+            case 1 -> new int[] { 2, 4, 6 };
+            case 2 -> new int[] { 2, 4, 5 };
+            case 3 -> new int[] { 3, 4 };
+            case 4 -> new int[] { 4 };
+            default -> new int[] { 2, 4 };
+        };
+        view.addChord(view.activeTrack(), steps, position.getSelectedIndex() == 1);
     }
 
     /** 选中项是否与任何收尾锁定相关（自己锁着别人，或被别人锁着）→ 决定「解除锁定」是否可点。 */

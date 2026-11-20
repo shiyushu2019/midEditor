@@ -269,7 +269,7 @@ final class InspectPanels {
             resolutionBox.setToolTipText("网格分辨率");
             visibleBox.setFont(Theme.SMALL_FONT);
             visibleBox.setOpaque(false);
-            visibleBox.setToolTipText("显示网格（Ctrl+G）");
+            visibleBox.setToolTipText("显示网格");
             snapBox.setFont(Theme.SMALL_FONT);
             snapBox.setOpaque(false);
             snapBox.setToolTipText("吸附到网格");
@@ -307,7 +307,7 @@ final class InspectPanels {
 
             keyboardRulerBox.setFont(Theme.SMALL_FONT);
             keyboardRulerBox.setOpaque(false);
-            keyboardRulerBox.setToolTipText("键盘标尺（Ctrl+K）");
+            keyboardRulerBox.setToolTipText("键盘标尺");
             keyboardRulerBox.addActionListener(e -> {
                 if (updating) {
                     return;
@@ -321,7 +321,7 @@ final class InspectPanels {
 
             cHighlightBox.setFont(Theme.SMALL_FONT);
             cHighlightBox.setOpaque(false);
-            cHighlightBox.setToolTipText("C 高亮（Ctrl+Shift+K）");
+            cHighlightBox.setToolTipText("C 高亮");
             cHighlightBox.addActionListener(e -> {
                 if (updating) {
                     return;
@@ -346,7 +346,7 @@ final class InspectPanels {
                 }
             });
             customTicksSpinner.setFont(Theme.SMALL_FONT);
-            customTicksSpinner.setToolTipText("长度（tick）");
+            customTicksSpinner.setToolTipText("长度");
             customTicksSpinner.addChangeListener(e -> {
                 if (updating) {
                     return;

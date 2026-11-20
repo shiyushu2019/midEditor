@@ -15,6 +15,9 @@ import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import org.junit.jupiter.api.Test;
@@ -272,13 +275,199 @@ class InteractionFixesTest {
             press(holder[0], arrows, KeyEvent.VK_RIGHT);
             assertTrue(view.selection().contains(first), "无选中时 → 应当选中第一条");
 
+            // ↑ 不再参与选中（只保留左右）
             SwingUtilities.invokeAndWait(() -> view.selection().clear());
             press(holder[0], arrows, KeyEvent.VK_UP);
-            assertTrue(view.selection().contains(first), "无选中时 ↑ 也应当选中第一条");
+            assertTrue(view.selection().isEmpty(), "↑ 不选任何东西");
 
             // 有选中时方向键照旧在相邻对象之间走位（不是每次回到第一条）
+            SwingUtilities.invokeAndWait(() -> view.selection().setSingle(first));
             press(holder[0], arrows, KeyEvent.VK_RIGHT);
             assertTrue(view.selection().contains(second), "有选中时 → 走到下一条");
+        } finally {
+            close(app, holder[0]);
+        }
+    }
+
+    @Test
+    void clickingTheRightEdgeStillAuditionsTheNote() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "需要图形环境");
+        AppContext app = new AppContext();
+        MainFrame[] holder = new MainFrame[1];
+        try {
+            MidiDocumentView view = openDocument(app, holder, List.of(new Note(60, 0, 480, 100)));
+            layOut(view);
+            com.example.mideditor.ui.pianoroll.PianoRollCanvas canvas = view.pianoRoll().canvas();
+            Track track = view.activeTrack();
+            Note note = track.notes().get(0);
+            int ppq = view.document().ppq();
+            int x = view.pianoRoll().timeline().xAtTick(note.endTick(), ppq) - 2;
+            int y = (view.pianoRoll().rowTop(track, 0, note.pitch())
+                    + view.pianoRoll().rowBottom(track, 0, note.pitch())) / 2;
+            long now = System.currentTimeMillis();
+            SwingUtilities.invokeAndWait(() -> {
+                canvas.dispatchEvent(new MouseEvent(canvas, MouseEvent.MOUSE_PRESSED, now, 0,
+                        x, y, 1, false, MouseEvent.BUTTON1));
+                canvas.dispatchEvent(new MouseEvent(canvas, MouseEvent.MOUSE_RELEASED, now + 20, 0,
+                        x, y, 1, false, MouseEvent.BUTTON1));
+            });
+
+            long[] audition = view.lastAuditionInfo();
+            assertNotNull(audition, "点右边缘（缩放区）也要试听");
+            assertEquals(60, audition[0], "试听的就是那条音");
+            assertTrue(view.inputBadgeVisible(), "单击也要亮浮牌");
+            assertEquals(60, view.inputBadgePitch());
+            assertEquals("C4", view.inputBadgePitchName());
+        } finally {
+            close(app, holder[0]);
+        }
+    }
+
+    @Test
+    void wasdMoveAuditionsTheNoteAndFlashesTheBadge() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "需要图形环境");
+        AppContext app = new AppContext();
+        MainFrame[] holder = new MainFrame[1];
+        try {
+            Note note = new Note(60, 0, 480, 100);
+            MidiDocumentView view = openDocument(app, holder, List.of(note));
+            SwingUtilities.invokeAndWait(() -> view.selection().setSingle(note));
+            assertFalse(view.inputBadgeVisible(), "前提：移动前没有牌子");
+
+            SwingUtilities.invokeAndWait(() -> view.moveSelection(0, 1));
+
+            assertEquals(61, note.pitch(), "W 上移半音");
+            long[] audition = view.lastAuditionInfo();
+            assertNotNull(audition, "WASD 移动后要试听");
+            assertEquals(61, audition[0], "听的是挪完之后那个音");
+            assertTrue(view.inputBadgeVisible(), "同时亮 1 秒浮牌");
+            assertEquals(61, view.inputBadgePitch());
+            assertEquals("C#4", view.inputBadgePitchName());
+        } finally {
+            close(app, holder[0]);
+        }
+    }
+
+    @Test
+    void mouseDragFlashesTheBadgeWithoutAuditioning() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "需要图形环境");
+        AppContext app = new AppContext();
+        MainFrame[] holder = new MainFrame[1];
+        try {
+            Note note = new Note(60, 0, 480, 100);
+            MidiDocumentView view = openDocument(app, holder, List.of(note));
+            SwingUtilities.invokeAndWait(() -> {
+                view.selection().setSingle(note);
+                view.beginSelectionEdit();
+            });
+            long[] before = view.lastAuditionInfo();
+
+            SwingUtilities.invokeAndWait(() -> view.applySelectionMove(0, 2));
+
+            assertEquals(62, note.pitch(), "拖动把音高挪上去了");
+            assertTrue(view.inputBadgeVisible(), "拖动要有浮牌");
+            assertEquals(62, view.inputBadgePitch());
+            assertEquals("D4", view.inputBadgePitchName());
+            assertSame(before, view.lastAuditionInfo(), "拖动不试听");
+        } finally {
+            close(app, holder[0]);
+        }
+    }
+
+    @Test
+    void seekingOutsideTheViewportScrollsToFollow() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "需要图形环境");
+        AppContext app = new AppContext();
+        MainFrame[] holder = new MainFrame[1];
+        try {
+            MidiDocumentView view = openDocument(app, holder, List.of(new Note(60, 0, 480, 100)));
+            layOut(view);
+            int ppq = view.document().ppq();
+
+            SwingUtilities.invokeAndWait(() -> view.seekTick(ppq * 2L));
+            assertEquals(0, view.pianoRoll().visibleRect().x, "视野内的定位不该乱滚");
+
+            SwingUtilities.invokeAndWait(() -> view.seekTick(ppq * 40L));
+            assertTrue(view.pianoRoll().visibleRect().x > 0, "拖到视野外要跟着滚过去");
+            int afterFar = view.pianoRoll().visibleRect().x;
+            int playheadX = view.pianoRoll().timeline().xAtTick(view.playheadTick(), ppq);
+            assertTrue(playheadX >= afterFar && playheadX <= afterFar + view.pianoRoll().visibleRect().width,
+                    "滚动后播放头应该在可见范围内");
+        } finally {
+            close(app, holder[0]);
+        }
+    }
+
+    @Test
+    void stopKeepsTheViewportWhereItIs() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "需要图形环境");
+        AppContext app = new AppContext();
+        MainFrame[] holder = new MainFrame[1];
+        try {
+            MidiDocumentView view = openDocument(app, holder, List.of(new Note(60, 1920, 480, 100)));
+            layOut(view);
+            SwingUtilities.invokeAndWait(() -> view.pianoRoll().scrollPane().getViewport()
+                    .setViewPosition(new Point(400, 0)));
+            assertEquals(400, view.pianoRoll().visibleRect().x, "前提：视野已经向右滚开");
+
+            SwingUtilities.invokeAndWait(view::stopTransport);
+
+            assertEquals(400, view.pianoRoll().visibleRect().x, "停止不跳视野");
+            assertEquals(0, view.playheadTick(), "播放头还是回到 0");
+        } finally {
+            close(app, holder[0]);
+        }
+    }
+
+    @Test
+    void batchMovesStaySilentWithoutAnyBadge() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "需要图形环境");
+        AppContext app = new AppContext();
+        MainFrame[] holder = new MainFrame[1];
+        try {
+            Note first = new Note(60, 0, 480, 100);
+            Note second = new Note(64, 480, 480, 100);
+            MidiDocumentView view = openDocument(app, holder, List.of(first, second));
+            SwingUtilities.invokeAndWait(() -> view.selection().setAll(List.of(first, second)));
+            long[] before = view.lastAuditionInfo();
+
+            // 键盘批量移动：不出声、不出牌
+            SwingUtilities.invokeAndWait(() -> view.moveSelection(0, 2));
+            assertEquals(62, first.pitch(), "两条一起上移");
+            assertEquals(66, second.pitch());
+            assertSame(before, view.lastAuditionInfo(), "批量 WASD 不试听");
+            assertFalse(view.inputBadgeVisible(), "批量 WASD 不出浮牌");
+
+            // 鼠标批量拖动：同样不出牌
+            SwingUtilities.invokeAndWait(view::beginSelectionEdit);
+            SwingUtilities.invokeAndWait(() -> view.applySelectionMove(120, 1));
+            assertSame(before, view.lastAuditionInfo(), "批量拖动不试听");
+            assertFalse(view.inputBadgeVisible(), "批量拖动不出浮牌");
+        } finally {
+            close(app, holder[0]);
+        }
+    }
+
+    @Test
+    void batchOfOnePitchStillGetsFeedback() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "需要图形环境");
+        AppContext app = new AppContext();
+        MainFrame[] holder = new MainFrame[1];
+        try {
+            Note first = new Note(60, 0, 480, 100);
+            Note second = new Note(60, 480, 480, 100);
+            MidiDocumentView view = openDocument(app, holder, List.of(first, second));
+            SwingUtilities.invokeAndWait(() -> view.selection().setAll(List.of(first, second)));
+
+            SwingUtilities.invokeAndWait(() -> view.moveSelection(0, 3));
+
+            assertEquals(63, first.pitch(), "两条一起上移");
+            assertEquals(63, second.pitch());
+            long[] audition = view.lastAuditionInfo();
+            assertNotNull(audition, "音高都一样 → 照样试听");
+            assertEquals(63, audition[0]);
+            assertTrue(view.inputBadgeVisible(), "音高都一样 → 照样亮牌");
+            assertEquals(63, view.inputBadgePitch());
         } finally {
             close(app, holder[0]);
         }

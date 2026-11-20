@@ -711,3 +711,53 @@ rewind()（F6 / ⏮ 按钮）与 stopTransport()（F4 / ⏹ 按钮，它本来�
 3. 顺带删掉 `degreeLabel(int, int)`（两参重载）：大小调重构后只留 `degreeLabel(tonic, minor, pitch)`，两参版本已成死代码。
 
 回归：`InputModeTest.pitchBadgeShowsWhileHoldingAndLingersOneSecond`（按新入场行为改写时间点：进场即亮、1 秒后灭）、`InputModeTest.switchingToOneNoteLightsThePitchBadgeForASecond`（W → 亮且音高 +1、写 C#4；0.5 秒仍亮、1 秒后灭；D 键 D 音不亮牌；Ctrl+U → 亮、+13、写 C#5）；全量 **174 项**全绿。
+
+### v1.32 添加和弦（音轨方法）
+
+1. 命令 `TRACK_ADD_CHORD`（音轨菜单「添加和弦…」，左侧音轨面板右键同款；无快捷键）：**永远以当前音轨为旋律**，和弦音按音级写到它下面的新音轨（`"<旋律轨名> · 三音"` / `"· 五音"` …），旋律原轨一条都不动。作用域是 `CommandScope.TRACK`，启用条件只有 `hasTrack` —— 空音轨也不发虚（点了就是什么都不做，不产生空编辑）。
+2. 对话框只有两项：类型（三和弦 `{2,4}` / 七和弦 `{2,4,6}` / 六和弦 `{2,4,5}` / 挂四 `{3,4}` / 五度 `{4}`）与位置（上方 / 下方）。
+3. 音高算法 `chordInterval(pitch, steps, tonic, minor, below)`：把根音换算成「绝对音级」（`octave*7 + degree`），±steps 级再折回音高——调内旋律得到调内和弦（C 大调 C → E+G，A 小调 A → C+E）；根音不在音阶上时退回调式的固定音程（大调三音 +4、小调三音 +3、五音 +7、七音 +11/+10）。和弦音与原音 `startTick` / `durationTicks` / `velocity` 完全一致。
+4. **只追加、不删不改**（v1.34 定稿）：每次调用都新建一组音轨插到旋律轨下面，绝不删除或改写已有音轨 —— 就跟「添加音轨」一样普通。所以（a）重复点会真的多出一组和弦轨；（b）对和弦轨再点一次也照样按算法叠出新的音轨；（c）`Track` 上不再有任何“这是和弦轨”的隐藏字段（`chordSourceId` 已删）。
+5. 撤销：一条 `SimpleEdit`（建新轨 + 补音 / 删新轨 + 删音），只回收这一次加的东西。
+
+回归：`AutoChordTest` 8 项（和弦轨落在旋律下面 + 大调叠音 + 起止力度、A 小调 A→C+E、半音 C#→F+G#、往下方叠、七和弦三条轨、重复执行再加一组且撤销只退这一组、和弦轨自己也能再加和弦、空音轨命令仍可用且右键菜单带「添加和弦」）。
+
+### v1.33 音轨面板右键菜单 + 开播前收干净
+
+1. 音轨面板右键：`MenuBarBuilder.addTrackItems()` 抽出来给顶部「音轨」菜单和 `trackPopup()` 共用（`item`/`checkItem` 改成收 `Container`，右键版用 `stripMnemonic()` 去掉「(A)」这类助记符括号）。
+2. **右键即选中**：不再用 `setComponentPopupMenu`（L&F 抢先弹菜单，选中时机不可靠），改成自己处理 popup trigger —— 先 `list.setSelectedIndex` + `view.setActiveTrack(...)`，再 `popup.show(...)`；列表外的空白/按钮区也挂同一份菜单。
+3. **开头那声短促怪音**：单击平行线 / 方向键走位 / 输入模式按住 Q 都会调 `SynthService.audition/previewOn`，那个音还挂着的时候按播放，`resetAllChannels()` 的 CC120 会把它硬切；更隐蔽的是 `pendingNoteOns` 里**已排进合成器队列、还没到点**的 note-on —— 它们没法撤回，一开播就会在开头冒出来。
+   - `play()`：先 `panic()` 再 `pendingNoteOns.clear()` + `resetAllChannels()`（顺序很重要，先收干净再重置）；
+   - `panic()`：对每条 pending note-on 在同一时间戳补 `NOTE_OFF` + `CC120`；
+   - `seek()`：不管在播还是暂停都先 `panic()`（“回到开头”就是把排队的东西一并清掉）；
+   - `nextIndex` / `cycleOffsetUs` 合成一个 `volatile record Cursor`，消除 EDT 重新锚定与调度线程共享可变 int 的竞态（半新半旧的 index 会让一串“后面的音”在开头被投出去）；
+   - `togglePlayPause()` 再补 `endInputAudition()` + 按住中的输入音 `abortInputNote()`。
+4. 回归：`PlaybackStartTest`（假 Receiver 记录消息：先 audition 72，再 play 一个从 60 开始的文档 → 必须先看到 NOTE_OFF 72、且 NOTE_ON 60 在它之后，72/60 各只响一次）。
+
+### v1.35 试听与浮牌补齐（点边缘 / 方向键 / WASD）
+
+1. **点右边缘也试听**：`PianoRollCanvas.mouseReleased` 原来只认 `mode == MOVE`，按在右端 6px 内是 `RESIZE` 模式 → 只选中不出声。现在 `(mode == MOVE || mode == RESIZE) && !dragged` 都试听——拖了才是改长度。
+2. **浮牌不再只在输入模式画**：`PianoRollPainter.paintInputBadge` 去掉 `host.inputMode()` 这个门槛，泳道跟 `host.inputBadgeTrack()`（新字段，为空才退回活动音轨）；`onUiTick` 里“到点清掉重绘”也提到输入模式判断之外。新增 `flashInputBadge(track, pitch, tick, rest)`：只亮 1 秒、不进入“按住”状态。
+3. **←/→ 换选中对象时亮牌**：`stepSelection` 试听后 `flashInputBadge(...)`，所以换一个音就能看到「C#4 | 3」。
+4. **WASD 移动也试听 + 亮牌**：`moveSelection` 提交后取 `firstSoundingSelection()`，`auditionNote` + `flashInputBadge`；休止符 ripple 分支不发声。
+5. **↑/↓ 退出选中**：`ArrowKeyDispatcher.commandIdFor` 对 `VK_UP`/`VK_DOWN` 返回 null，`PianoRollCanvas.installArrowKeys` 不再绑这两键，`NOTE_SELECT_UP/DOWN` 命令去掉加速键与菜单项（能力 `stepSelection(0, ±1)` 保留）。
+
+回归：`SelectionStepTest.upAndDownKeysNoLongerWalkByPitch`（↑/↓ 不动选中，`stepSelection(0,1)` 仍能走）、`SelectionStepTest.steppingShowsThePitchBadgeForASecond`、`InteractionFixesTest.clickingTheRightEdgeStillAuditionsTheNote`、`InteractionFixesTest.wasdMoveAuditionsTheNoteAndFlashesTheBadge`、`LoopAndArrowKeyTest` 改断言“↑/↓ 无绑定”。
+
+### v1.36 拖动只亮牌不发声、停止不动视野、播放头跟滚
+
+1. **鼠标拖动平行线**：`applySelectionMove` 末尾用 `firstMovingNote()` 取锚点，`flashInputBadge(...)` 亮 1 秒浮牌，但**不调用 `auditionNote`**（拖动中连续发声太吵）；键盘 WASD 仍是“试听 + 浮牌”。单击（含点右边缘不拖）照旧试听。
+2. **停止不跳视野**：`stopTransport()` 删掉 `pianoRoll.scrollToTimeStart()`——F4 只把播放头收回 0；只有 F6「回到开头」才把频谱拉回开头。
+3. **播放头拖出视野会跟滚**：新增 `PianoRollView.ensureTickVisible(tick)`（`ensureWidthFor` + 只在目标跑出可见范围时才 `setViewPosition` 居中，视野内不乱动），`MidiDocumentView.seekTick` 里调用它——所以标尺拖动、频谱里的红线拖动、程序化 seek 都会自动跟随。
+
+回归：`InteractionFixesTest.mouseDragFlashesTheBadgeWithoutAuditioning`（拖动后浮牌在、`lastAuditionInfo()` 引用不变）、`seekingOutsideTheViewportScrollsToFollow`（视野内不滚、拖到 ppq*40 处滚过去且播放头落在可见范围）、`stopKeepsTheViewportWhereItIs`（`stopTransport` 后 `visibleRect().x` 不变、播放头回 0）。
+
+### v1.37 批量移动：同音高才给反馈
+
+1. 判据从「只选一条」改成 **`selectionSharesOnePitch()`**（选中的发声平行线音高全都一样，单选当然算）：这种情况下 `moveSelection` 照旧 `auditionNote` + `flashInputBadge`，`applySelectionMove` 照旧只亮牌；**音高参差的批量移动才完全静音、不出牌**——同一个音高一个反馈就代表全部，参差的批量则没有任何等价物。
+2. 回归：`InteractionFixesTest.batchMovesStaySilentWithoutAnyBadge`（60+64 一起挪 → 静音）、`batchOfOnePitchStillGetsFeedback`（两条都是 60，一起 +3 → 试听 63 且亮牌）；全量 **191 项**。
+
+### v1.39 单击也给浮牌
+
+1. 之前“单击 = 只有声音”（`mouseReleased` 里只调 `auditionNote`）、“拖动 = 只有牌子”（`applySelectionMove` 只 `flashInputBadge`），两边都只给一半反馈。现在新增 `MidiDocumentView.auditionNoteWithBadge(track, note)`，`PianoRollCanvas` 的单击（含点右边缘不拖）走它：**试听 + 亮 1 秒浮牌**；拖动仍旧只亮牌不发声。
+2. 回归：`InteractionFixesTest.clickingTheRightEdgeStillAuditionsTheNote` 补断言（单击后 `inputBadgeVisible()` 为真、牌子写 C4）；全量 **191 项**。

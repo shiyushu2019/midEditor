@@ -379,10 +379,10 @@ final class PianoRollPainter {
      */
     private static void paintInputBadge(Graphics2D g, PianoRollView view, MidiDocumentView host,
             MidiDocument document, Rectangle clip) {
-        if (!host.inputMode() || !host.inputBadgeVisible()) {
+        if (!host.inputBadgeVisible()) {
             return;
         }
-        Track track = host.activeTrack();
+        Track track = host.inputBadgeTrack() != null ? host.inputBadgeTrack() : host.activeTrack();
         if (track == null) {
             return;
         }

@@ -61,12 +61,12 @@ public final class TransportBar extends JPanel {
         loopLabel.setPreferredSize(new java.awt.Dimension(140, 22));
         loopLabel.setToolTipText("循环域");
         add(loopLabel);
-        JButton loopToSelection = textButton("循环=选区", "循环域设为选区（Ctrl+Shift+L）");
+        JButton loopToSelection = textButton("循环=选区", "循环域设为选区");
         loopToSelection.addActionListener(e -> host.loopToSelection());
         add(loopToSelection);
         add(toggleButton(registry.action(AppCommandIds.PLAY_TOGGLE_METRONOME), Icons.metronome(), "节拍器（Ctrl+M）"));
 
-        JButton addTrack = textButton("＋轨", "添加音轨（Ctrl+Shift+T）");
+        JButton addTrack = textButton("＋轨", "添加音轨");
         addTrack.addActionListener(e -> host.addTrack());
         add(addTrack);
         JButton removeTrack = textButton("－轨", "删除音轨");
@@ -84,7 +84,7 @@ public final class TransportBar extends JPanel {
         bpmSpinner = new JSpinner(new SpinnerNumberModel(120, 20, 300, 1));
         bpmSpinner.setFont(Theme.BASE_FONT);
         bpmSpinner.setPreferredSize(new java.awt.Dimension(64, 24));
-        bpmSpinner.setToolTipText("速度（20–300 BPM）");
+        bpmSpinner.setToolTipText("速度");
         bpmSpinner.addChangeListener(e -> {
             if (updating) {
                 return;
@@ -113,7 +113,7 @@ public final class TransportBar extends JPanel {
         keyBox.setFont(Theme.SMALL_FONT);
         keyBox.setPreferredSize(new java.awt.Dimension(64, 22));
         keyBox.setMaximumRowCount(24);
-        keyBox.setToolTipText("调号（无 m = 大调，带 m = 小调）");
+        keyBox.setToolTipText("调号");
         keyBox.setSelectedIndex(host.document().keyTonic() * 2 + (host.document().keyMinor() ? 1 : 0));
         keyBox.addActionListener(e -> {
             if (updating || keyBox.getSelectedIndex() < 0) {
@@ -147,7 +147,7 @@ public final class TransportBar extends JPanel {
         add(label("缩放"));
         zoomSlider = new JSlider(25, 800, 100);
         zoomSlider.setPreferredSize(new java.awt.Dimension(120, 22));
-        zoomSlider.setToolTipText("水平缩放（Ctrl+= / Ctrl+- / Ctrl+0）");
+        zoomSlider.setToolTipText("缩放");
         zoomSlider.addChangeListener(e -> {
             if (updating) {
                 return;

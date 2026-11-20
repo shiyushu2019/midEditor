@@ -7,6 +7,7 @@ import java.util.List;
 import javax.swing.SwingUtilities;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
@@ -120,7 +121,7 @@ class SelectionStepTest {
     }
 
     @Test
-    void upAndDownWalkByPitch() throws Exception {
+    void upAndDownKeysNoLongerWalkByPitch() throws Exception {
         assumeFalse(GraphicsEnvironment.isHeadless(), "需要图形环境");
         AppContext app = new AppContext();
         MainFrame[] holder = new MainFrame[1];
@@ -133,11 +134,38 @@ class SelectionStepTest {
             SwingUtilities.invokeAndWait(() -> view.selection().setSingle(middle));
 
             press(app, dispatcher, KeyEvent.VK_UP, 0);
-            assertTrue(view.selection().contains(high), "↑ 到上面最近的那条");
+            assertTrue(view.selection().contains(middle), "↑ 不再换选中对象");
             press(app, dispatcher, KeyEvent.VK_DOWN, 0);
-            assertTrue(view.selection().contains(middle), "↓ 回到中间");
-            press(app, dispatcher, KeyEvent.VK_DOWN, 0);
-            assertTrue(view.selection().contains(low), "↓ 再往下一条");
+            assertTrue(view.selection().contains(middle), "↓ 也不再换");
+
+            // 能力本身还在（菜单 / 未来快捷键可调），只是键盘不绑了
+            SwingUtilities.invokeAndWait(() -> view.stepSelection(0, 1));
+            assertTrue(view.selection().contains(high), "stepSelection(0,1) 仍能往上走");
+            SwingUtilities.invokeAndWait(() -> view.stepSelection(0, -1));
+            assertTrue(view.selection().contains(middle), "再往下回到中间");
+        } finally {
+            close(app, holder[0]);
+        }
+    }
+
+    @Test
+    void steppingShowsThePitchBadgeForASecond() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "需要图形环境");
+        AppContext app = new AppContext();
+        MainFrame[] holder = new MainFrame[1];
+        try {
+            Note first = new Note(60, 0, 480, 100);
+            Note second = new Note(64, 480, 480, 100);
+            MidiDocumentView view = openDocument(app, holder, List.of(first, second));
+            ArrowKeyDispatcher dispatcher = new ArrowKeyDispatcher(app);
+            SwingUtilities.invokeAndWait(() -> view.selection().setSingle(first));
+            assertFalse(view.inputBadgeVisible(), "前提：没动之前没有牌子");
+
+            press(app, dispatcher, KeyEvent.VK_RIGHT, 0);
+            assertTrue(view.inputBadgeVisible(), "换了一个音就该亮牌");
+            assertEquals(64, view.inputBadgePitch(), "牌子上是新的那个音");
+            assertEquals("E4", view.inputBadgePitchName());
+            assertEquals("3", view.inputBadgeDegree(), "C 大调里 E 是 3");
         } finally {
             close(app, holder[0]);
         }

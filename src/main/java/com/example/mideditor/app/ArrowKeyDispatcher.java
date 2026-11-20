@@ -104,8 +104,7 @@ public final class ArrowKeyDispatcher implements KeyEventDispatcher {
             case KeyEvent.VK_LEFT -> ctrl ? AppCommandIds.NOTE_EXTEND_LEFT
                     : shift ? AppCommandIds.NOTE_TRIM_RIGHT
                             : AppCommandIds.NOTE_SELECT_LEFT;
-            case KeyEvent.VK_UP -> ctrl || shift ? null : AppCommandIds.NOTE_SELECT_UP;
-            case KeyEvent.VK_DOWN -> ctrl || shift ? null : AppCommandIds.NOTE_SELECT_DOWN;
+            case KeyEvent.VK_UP, KeyEvent.VK_DOWN -> null; // 上下键不再参与选中（只留左右）
             default -> null;
         };
     }

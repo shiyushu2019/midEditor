@@ -1,12 +1,12 @@
 package com.example.mideditor.ui.tools;
 
-import com.example.mideditor.app.AppContext;
-import com.example.mideditor.app.Refreshable;
-import com.example.mideditor.document.MidiDocumentView;
-import com.example.mideditor.document.SimpleEdit;
-import com.example.mideditor.domain.GmProgram;
-import com.example.mideditor.domain.Track;
-import com.example.mideditor.ui.theme.Theme;
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Dimension;
+import java.awt.FlowLayout;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.Consumer;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -21,13 +21,14 @@ import javax.swing.JScrollPane;
 import javax.swing.JSlider;
 import javax.swing.JToggleButton;
 import javax.swing.ListSelectionModel;
-import java.awt.BorderLayout;
-import java.awt.Color;
-import java.awt.Dimension;
-import java.awt.FlowLayout;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.function.Consumer;
+
+import com.example.mideditor.app.AppContext;
+import com.example.mideditor.app.Refreshable;
+import com.example.mideditor.document.MidiDocumentView;
+import com.example.mideditor.document.SimpleEdit;
+import com.example.mideditor.domain.GmProgram;
+import com.example.mideditor.domain.Track;
+import com.example.mideditor.ui.theme.Theme;
 
 /** 音轨 / 乐器 / 混音器 面板。 */
 final class TrackToolsPanels {
@@ -78,6 +79,7 @@ final class TrackToolsPanels {
                 }
             });
             add(new JScrollPane(list), BorderLayout.CENTER);
+            installTrackPopup();
             JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 3, 2));
             buttons.add(button("＋", "添加音轨", () -> withView(MidiDocumentView::addTrack)));
             buttons.add(button("－", "删除音轨", () -> withView(v -> v.removeTrack(v.activeTrack()))));
@@ -91,6 +93,64 @@ final class TrackToolsPanels {
             if (view != null) {
                 action.accept(view);
             }
+        }
+
+        /**
+         * 右键 = 顶部「音轨」菜单同款。先自己处理 popup trigger（不用 setComponentPopupMenu，
+         * 那个由 L&F 抢先弹菜单，选中时机不可靠），保证“右键即选中鼠标下那一条”。
+         */
+        private void installTrackPopup() {
+            list.addMouseListener(new java.awt.event.MouseAdapter() {
+                @Override
+                public void mousePressed(java.awt.event.MouseEvent e) {
+                    maybeShow(e);
+                }
+
+                @Override
+                public void mouseReleased(java.awt.event.MouseEvent e) {
+                    maybeShow(e);
+                }
+
+                private void maybeShow(java.awt.event.MouseEvent e) {
+                    if (!e.isPopupTrigger()) {
+                        return;
+                    }
+                    int index = list.locationToIndex(e.getPoint());
+                    if (index >= 0 && index < list.getModel().getSize()) {
+                        list.setSelectedIndex(index);
+                        if (index < snapshot.size()) {
+                            MidiDocumentView view = app.activeView();
+                            if (view != null) {
+                                view.setActiveTrack(snapshot.get(index));
+                            }
+                        }
+                    }
+                    app.refreshCommandStates();
+                    new com.example.mideditor.ui.frame.MenuBarBuilder(app).trackPopup()
+                            .show(list, e.getX(), e.getY());
+                }
+            });
+            // 列表外的空白 / 按钮区右键也给同一个菜单（不动选中，作用在当前音轨上）
+            TracksPanel.this.addMouseListener(new java.awt.event.MouseAdapter() {
+                @Override
+                public void mousePressed(java.awt.event.MouseEvent e) {
+                    maybeShow(e);
+                }
+
+                @Override
+                public void mouseReleased(java.awt.event.MouseEvent e) {
+                    maybeShow(e);
+                }
+
+                private void maybeShow(java.awt.event.MouseEvent e) {
+                    if (!e.isPopupTrigger()) {
+                        return;
+                    }
+                    app.refreshCommandStates();
+                    new com.example.mideditor.ui.frame.MenuBarBuilder(app).trackPopup()
+                            .show(TracksPanel.this, e.getX(), e.getY());
+                }
+            });
         }
 
         @Override

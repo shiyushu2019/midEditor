@@ -64,7 +64,7 @@ public final class TrackHeaderRow extends JPanel {
         nameField.setPreferredSize(new Dimension(Math.max(32, inner - 18), 20));
         nameField.setEditable(false);
         nameField.setFocusable(false);
-        nameField.setToolTipText("单击切换音轨，双击重命名");
+        nameField.setToolTipText("音轨名");
         nameField.addMouseListener(new java.awt.event.MouseAdapter() {
             @Override
             public void mousePressed(java.awt.event.MouseEvent e) {
@@ -361,9 +361,7 @@ public final class TrackHeaderRow extends JPanel {
             panSlider.setValue(track.pan());
             rangeLabel.setText(track.yRange().low() + "-" + (track.yRange().high() - 1)
                     + " · " + track.pitchRows() + "行");
-            rangeLabel.setToolTipText("Ch" + (track.channel() + 1) + " 音域 "
-                    + track.yRange().low() + "-" + (track.yRange().high() - 1)
-                    + "（共 " + track.pitchRows() + " 个半音）");
+            rangeLabel.setToolTipText("音域");
             boolean active = host().activeTrack() == track;
             setBackground(active ? new Color(0xB9D2FE) : new Color(0xF7F8FA));
             setBorder(active

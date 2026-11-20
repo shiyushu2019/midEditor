@@ -59,13 +59,9 @@ public final class PianoRollCanvas extends JComponent {
         marqueeScroller.setRepeats(true);
     }
 
-    /** 方向键移动选中框（画布有焦点时优先于滚动面板的同键绑定）。 */
+    /** 方向键移动选中框（画布有焦点时优先于滚动面板的同键绑定）。上下键不参与。 */
     private void installArrowKeys() {
         CommandRegistry registry = view.host().app().registry();
-        registry.bindLocal(this, javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_UP, 0),
-                AppCommandIds.NOTE_SELECT_UP);
-        registry.bindLocal(this, javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_DOWN, 0),
-                AppCommandIds.NOTE_SELECT_DOWN);
         registry.bindLocal(this, javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_LEFT, 0),
                 AppCommandIds.NOTE_SELECT_LEFT);
         registry.bindLocal(this, javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_RIGHT, 0),
@@ -260,7 +256,8 @@ public final class PianoRollCanvas extends JComponent {
         public void mouseReleased(MouseEvent e) {
             Track auditionTrack = dragTrack;
             Note auditionNote = pressedNote;
-            boolean audition = mode == Mode.MOVE && !dragged && auditionNote != null;
+            // 点边缘是「缩放」手势，但没真拖动就只是一次单击 → 一样要试听
+            boolean audition = (mode == Mode.MOVE || mode == Mode.RESIZE) && !dragged && auditionNote != null;
             switch (mode) {
                 case MOVE -> host().commitSelectionEdit("移动平行线");
                 case RESIZE -> host().commitSelectionEdit("调整平行线长度");
@@ -282,7 +279,7 @@ public final class PianoRollCanvas extends JComponent {
             pressedNote = null;
             dragged = false;
             if (audition) {
-                host().auditionNote(auditionTrack, auditionNote);
+                host().auditionNoteWithBadge(auditionTrack, auditionNote);
             }
             mouseMoved(e);
         }

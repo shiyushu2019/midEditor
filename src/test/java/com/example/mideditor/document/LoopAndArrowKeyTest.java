@@ -14,6 +14,7 @@ import javax.swing.SwingUtilities;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import org.junit.jupiter.api.Test;
@@ -140,9 +141,11 @@ class LoopAndArrowKeyTest {
             });
             Note note = track.notes().get(0);
 
-            // 画布 WHEN_FOCUSED 的裸方向键现在归「选中框」
-            assertEquals(AppCommandIds.NOTE_SELECT_UP, canvas.getInputMap(JComponent.WHEN_FOCUSED)
-                    .get(KeyStroke.getKeyStroke(KeyEvent.VK_UP, 0)));
+            // 画布 WHEN_FOCUSED 的裸方向键现在归「选中框」；上下键不再参与选中
+            assertNull(canvas.getInputMap(JComponent.WHEN_FOCUSED)
+                    .get(KeyStroke.getKeyStroke(KeyEvent.VK_UP, 0)), "↑ 不再有绑定");
+            assertNull(canvas.getInputMap(JComponent.WHEN_FOCUSED)
+                    .get(KeyStroke.getKeyStroke(KeyEvent.VK_DOWN, 0)), "↓ 不再有绑定");
             assertEquals(AppCommandIds.NOTE_SELECT_LEFT, canvas.getInputMap(JComponent.WHEN_FOCUSED)
                     .get(KeyStroke.getKeyStroke(KeyEvent.VK_LEFT, 0)));
 

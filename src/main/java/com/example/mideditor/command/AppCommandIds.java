@@ -64,6 +64,8 @@ public final class AppCommandIds {
 
     public static final String TRACK_ADD = "track.add";
     public static final String TRACK_REMOVE = "track.remove";
+    /** 添加和弦：以当前音轨为旋律，和弦音写到它下面的新音轨。 */
+    public static final String TRACK_ADD_CHORD = "track.addChord";
     public static final String TRACK_MOVE_UP = "track.moveUp";
     public static final String TRACK_MOVE_DOWN = "track.moveDown";
     public static final String TRACK_TOGGLE_MUTE = "track.toggleMute";

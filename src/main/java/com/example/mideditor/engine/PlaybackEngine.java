@@ -41,6 +41,13 @@ public final class PlaybackEngine {
     private record PendingNoteOn(int channel, int pitch, long timestamp) {
     }
 
+    /**
+     * 投递进度（不可变）：EDT 重新锚定时整个替换，
+     * 调度线程读到的永远是“某个完整瞬间”的 index + 循环偏移，不会拿到半新半旧的组合。
+     */
+    private record Cursor(int index, long cycleOffsetUs) {
+    }
+
     private final SynthService synth;
     private final List<Listener> listeners = new CopyOnWriteArrayList<>();
     private final Object lock = new Object();
@@ -58,8 +65,7 @@ public final class PlaybackEngine {
     /** 计划代号：每次换计划 / 重新锚定就 +1，调度线程一旦发现代号变了就立即停手，不再发旧事件。 */
     private volatile long planEpoch;
 
-    private int nextIndex;
-    private long cycleOffsetUs;
+    private volatile Cursor cursor = new Cursor(0, 0);
     private Thread scheduler;
 
     public PlaybackEngine(SynthService synth) {
@@ -102,6 +108,9 @@ public final class PlaybackEngine {
             // 等旧调度线程真正退出，否则它手上的旧批次会在新计划生效后继续发出去
             joinScheduler(stopSchedulerThread());
             planEpoch++;
+            // 先把这条引擎留下的声音全收干净——包括已经排进合成器队列、还没到点的 note-on。
+            // 不然上一次播放/定位残留的那些排队事件会在新一次播放的最开头“冒出其他音”。
+            panic();
             pendingNoteOns.clear();
             synth.resetAllChannels();
             this.owner = owner;
@@ -148,9 +157,9 @@ public final class PlaybackEngine {
                 return;
             }
             long target = Math.max(0, tick);
-            if (state == State.PLAYING) {
-                panic();
-            }
+            // 不管在播还是暂停，定位前都先收干净（含排队中未响的 note-on），
+            // 否则“回到开头”后那几个排队事件会晚一步冒出来
+            panic();
             planEpoch++;
             anchor(target);
             frozenTick = target;
@@ -231,8 +240,7 @@ public final class PlaybackEngine {
         long target = Math.max(0, tick);
         anchorMicros = p.tempo().microsAtTick(target);
         anchorNanos = System.nanoTime();
-        cycleOffsetUs = 0;
-        nextIndex = p.indexAtTick(target);
+        cursor = new Cursor(p.indexAtTick(target), 0);
         frozenTick = target;
         sendStateUpTo(p, target);
     }
@@ -293,10 +301,12 @@ public final class PlaybackEngine {
         PendingNoteOn pending;
         while ((pending = pendingNoteOns.pollFirst()) != null) {
             try {
-                // 同一时间戳（而不是 +1µs）：合成器按到达顺序处理，note-on 后紧跟 note-off，
-                // 连一个采样块的发声都不会漏出来
+                // 已经排进合成器队列的 note-on 没法真正撤回，只能在同一时间戳上紧跟一条
+                // note-off + All Sound Off：按到达顺序处理，那个音连一个采样块都活不下来。
                 long timestamp = now >= 0 ? Math.max(now, pending.timestamp()) : -1;
                 synth.send(new ShortMessage(ShortMessage.NOTE_OFF, pending.channel(), pending.pitch(), 0),
+                        timestamp);
+                synth.send(new ShortMessage(ShortMessage.CONTROL_CHANGE, pending.channel(), 120, 0),
                         timestamp);
             } catch (javax.sound.midi.InvalidMidiDataException | RuntimeException ignored) {
                 // 取消失败也无所谓，随后的 allNotesOff 会兵底
@@ -331,16 +341,17 @@ public final class PlaybackEngine {
             pendingNoteOns.removeIf(pending -> pending.timestamp() <= synthNow);
         }
         List<PlaybackPlan.Event> events = p.events();
+        Cursor c = cursor;
         while (state == State.PLAYING) {
             // 计划已被换掉（静音、独奏、编辑、seek）：这批旧事件立刻作废，
             // 否则旧计划里的音符会在新计划生效后又“漏”出去一小段
             if (epoch != planEpoch || plan != p) {
                 return;
             }
-            if (nextIndex >= events.size()) {
+            if (c.index() >= events.size()) {
                 if (loopEnabled && loopRange.valid()) {
-                    nextIndex = p.indexAtTick(loopRange.startTick());
-                    cycleOffsetUs += loopLengthUs(p);
+                    c = new Cursor(p.indexAtTick(loopRange.startTick()), c.cycleOffsetUs() + loopLengthUs(p));
+                    cursor = c;
                     continue;
                 }
                 long endUs = p.tempo().microsAtTick(p.endTick()) - anchorMicros;
@@ -349,13 +360,13 @@ public final class PlaybackEngine {
                 }
                 break;
             }
-            PlaybackPlan.Event event = events.get(nextIndex);
+            PlaybackPlan.Event event = events.get(c.index());
             if (loopEnabled && loopRange.valid() && event.tick() >= loopRange.endTick()) {
-                nextIndex = p.indexAtTick(loopRange.startTick());
-                cycleOffsetUs += loopLengthUs(p);
+                c = new Cursor(p.indexAtTick(loopRange.startTick()), c.cycleOffsetUs() + loopLengthUs(p));
+                cursor = c;
                 continue;
             }
-            double dueUs = p.tempo().microsAtTick(event.tick()) + cycleOffsetUs - anchorMicros;
+            double dueUs = p.tempo().microsAtTick(event.tick()) + c.cycleOffsetUs() - anchorMicros;
             if (dueUs > horizonUs) {
                 break;
             }
@@ -363,7 +374,8 @@ public final class PlaybackEngine {
                 return;
             }
             sendScheduled(event, dueUs);
-            nextIndex++;
+            c = new Cursor(c.index() + 1, c.cycleOffsetUs());
+            cursor = c;
         }
     }
 

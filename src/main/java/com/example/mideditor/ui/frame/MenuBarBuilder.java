@@ -59,22 +59,54 @@ public final class MenuBarBuilder {
         }
     }
 
-    private JMenuItem item(JMenu menu, String commandId, String text) {
+    private JMenuItem item(java.awt.Container menu, String commandId, String text) {
+        return item(menu, commandId, text, true);
+    }
+
+    private JMenuItem item(java.awt.Container menu, String commandId, String text, boolean mnemonic) {
         Action action = app.registry().action(commandId);
         JMenuItem item = new JMenuItem(action);
-        applyMnemonic(item, text);
+        if (mnemonic) {
+            applyMnemonic(item, text);
+        } else {
+            item.setText(stripMnemonic(text));
+        }
         item.setFont(Theme.BASE_FONT);
         menu.add(item);
         return item;
     }
 
-    private JMenuItem checkItem(JMenu menu, String commandId, String text) {
+    private JCheckBoxMenuItem checkItem(java.awt.Container menu, String commandId, String text) {
+        return checkItem(menu, commandId, text, true);
+    }
+
+    private JCheckBoxMenuItem checkItem(java.awt.Container menu, String commandId, String text, boolean mnemonic) {
         Action action = app.registry().action(commandId);
         JCheckBoxMenuItem item = new JCheckBoxMenuItem(action);
-        applyMnemonic(item, text);
+        if (mnemonic) {
+            applyMnemonic(item, text);
+        } else {
+            item.setText(stripMnemonic(text));
+        }
         item.setFont(Theme.BASE_FONT);
         menu.add(item);
         return item;
+    }
+
+    /** 「添加音轨(A)」→「添加音轨」：右键菜单里不要助记符括号。 */
+    private static String stripMnemonic(String text) {
+        if (text != null && text.length() >= 3 && text.endsWith(")") && text.charAt(text.length() - 3) == '(') {
+            return text.substring(0, text.length() - 3);
+        }
+        return text;
+    }
+
+    private static void separator(java.awt.Container menu) {
+        if (menu instanceof JMenu menu1) {
+            menu1.addSeparator();
+        } else if (menu instanceof javax.swing.JPopupMenu popup) {
+            popup.addSeparator();
+        }
     }
 
     private JMenu fileMenu() {
@@ -128,8 +160,6 @@ public final class MenuBarBuilder {
         lines.addSeparator();
         item(lines, AppCommandIds.NOTE_SELECT_LEFT, "选中左一条");
         item(lines, AppCommandIds.NOTE_SELECT_RIGHT, "选中右一条");
-        item(lines, AppCommandIds.NOTE_SELECT_UP, "选中上一条");
-        item(lines, AppCommandIds.NOTE_SELECT_DOWN, "选中下一条");
         lines.addSeparator();
         item(lines, AppCommandIds.NOTE_EXTEND_LEFT, "左端延长");
         item(lines, AppCommandIds.NOTE_EXTEND_RIGHT, "右端延长");
@@ -146,15 +176,27 @@ public final class MenuBarBuilder {
 
     private JMenu trackMenu() {
         JMenu menu = menu("音轨(T)", 'T');
-        item(menu, AppCommandIds.TRACK_ADD, "添加音轨(A)");
-        item(menu, AppCommandIds.TRACK_REMOVE, "删除音轨(D)");
-        menu.addSeparator();
-        item(menu, AppCommandIds.TRACK_MOVE_UP, "音轨上移(U)");
-        item(menu, AppCommandIds.TRACK_MOVE_DOWN, "音轨下移(N)");
-        menu.addSeparator();
-        checkItem(menu, AppCommandIds.TRACK_TOGGLE_MUTE, "静音(M)");
-        checkItem(menu, AppCommandIds.TRACK_TOGGLE_SOLO, "独奏(S)");
+        addTrackItems(menu, true);
         return menu;
+    }
+
+    /** 音轨面板右键菜单：和顶部「音轨」菜单同一份内容，只是不带助记符括号。 */
+    public javax.swing.JPopupMenu trackPopup() {
+        javax.swing.JPopupMenu popup = new javax.swing.JPopupMenu();
+        addTrackItems(popup, false);
+        return popup;
+    }
+
+    private void addTrackItems(java.awt.Container menu, boolean mnemonic) {
+        item(menu, AppCommandIds.TRACK_ADD, "添加音轨(A)", mnemonic);
+        item(menu, AppCommandIds.TRACK_REMOVE, "删除音轨(D)", mnemonic);
+        item(menu, AppCommandIds.TRACK_ADD_CHORD, "添加和弦…", mnemonic);
+        separator(menu);
+        item(menu, AppCommandIds.TRACK_MOVE_UP, "音轨上移(U)", mnemonic);
+        item(menu, AppCommandIds.TRACK_MOVE_DOWN, "音轨下移(N)", mnemonic);
+        separator(menu);
+        checkItem(menu, AppCommandIds.TRACK_TOGGLE_MUTE, "静音(M)", mnemonic);
+        checkItem(menu, AppCommandIds.TRACK_TOGGLE_SOLO, "独奏(S)", mnemonic);
     }
 
     private JMenu viewMenu() {
